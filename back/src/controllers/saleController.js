@@ -94,6 +94,7 @@ exports.createSale = async (req, res) => {
     });
   }
 };
+
 // Obtener todas las ventas
 exports.getSales = async (req, res) => {
   try {
@@ -243,6 +244,7 @@ exports.getSalesStats = async (req, res) => {
   try {
     console.log('Usuario autenticado:', req.user);
 
+    // Obtener estadísticas básicas
     const totalSales = await Sale.countDocuments({ status: 'Completada' });
     const totalRevenue = await Sale.aggregate([
       { $match: { status: 'Completada' } },
@@ -252,13 +254,122 @@ exports.getSalesStats = async (req, res) => {
       }}
     ]);
 
+    // Obtener ventas mensuales
+    const monthlySales = await Sale.aggregate([
+      { $match: { status: 'Completada' } },
+      {
+        $group: {
+          _id: {
+            year: { $year: '$saleDate' },
+            month: { $month: '$saleDate' }
+          },
+          total: { $sum: '$totalAmount' }
+        }
+      },
+      { $sort: { '_id.year': -1, '_id.month': -1 } },
+      { $limit: 12 },
+      {
+        $project: {
+          _id: 0,
+          month: {
+            $concat: [
+              { $toString: '$_id.year' },
+              '-',
+              {
+                $cond: {
+                  if: { $lt: ['$_id.month', 10] },
+                  then: { $concat: ['0', { $toString: '$_id.month' }] },
+                  else: { $toString: '$_id.month' }
+                }
+              }
+            ]
+          },
+          total: 1
+        }
+      }
+    ]);
+
+    // Obtener productos más vendidos
+    const topProducts = await Sale.aggregate([
+      { $match: { status: 'Completada' } },
+      { $unwind: '$items' },
+      {
+        $group: {
+          _id: '$items.product',
+          name: { $first: '$items.name' },
+          totalSold: { $sum: '$items.quantity' }
+        }
+      },
+      { $sort: { totalSold: -1 } },
+      { $limit: 5 }
+    ]);
+
+    // Obtener conteo de productos con bajo stock
+    const lowStockProducts = await Product.countDocuments({ stock: { $lt: 10 } });
+
+    // Obtener total de productos
+    const totalProducts = await Product.countDocuments();
+
     res.json({
       success: true,
+      totalProducts,
+      lowStockProducts,
       totalSales,
-      totalRevenue: totalRevenue[0] ? totalRevenue[0].total : 0
+      totalRevenue: totalRevenue[0] ? totalRevenue[0].total : 0,
+      customerStats: {
+        totalCustomers: 0, // Esto deberá ser implementado cuando tengamos el modelo de clientes
+        totalDebt: 0,
+        customersByStatus: {
+          AL_DIA: 0,
+          EN_MORA: 0,
+          BLOQUEADO: 0
+        }
+      },
+      monthlySales,
+      topProducts,
+      topDebtors: [] // Esto deberá ser implementado cuando tengamos el modelo de clientes
     });
   } catch (error) {
     console.error('Error en estadísticas de ventas:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
+  }
+};
+
+// Actualizar venta
+exports.updateSale = async (req, res) => {
+  try {
+    const sale = await Sale.findById(req.params.id);
+    
+    if (!sale) {
+      return res.status(404).json({
+        success: false,
+        message: 'Venta no encontrada'
+      });
+    }
+
+    // Si la venta está cancelada, no permitir la edición
+    if (sale.status === 'Cancelada') {
+      return res.status(400).json({
+        success: false,
+        message: 'No se puede editar una venta cancelada'
+      });
+    }
+
+    // Actualizar los campos permitidos
+    if (req.body.paymentMethod) sale.paymentMethod = req.body.paymentMethod;
+    if (req.body.notes) sale.notes = req.body.notes;
+    if (req.body.customer) sale.customer = req.body.customer;
+
+    await sale.save();
+
+    res.json({
+      success: true,
+      data: sale
+    });
+  } catch (error) {
     res.status(500).json({
       success: false,
       message: error.message

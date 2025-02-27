@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../services/api';
+import { toast } from 'react-toastify';
 
 function Suppliers() {
   const [suppliers, setSuppliers] = useState([]);
@@ -41,14 +42,16 @@ function Suppliers() {
     try {
       if (currentSupplier._id) {
         await api.updateSupplier(currentSupplier._id, currentSupplier);
+        toast.success('Proveedor actualizado exitosamente');
       } else {
         await api.createSupplier(currentSupplier);
+        toast.success('Proveedor creado exitosamente');
       }
       setShowModal(false);
       loadSuppliers();
       resetForm();
     } catch (error) {
-      setError(error.response?.data?.message || 'Error al guardar el proveedor');
+      toast.error(error.response?.data?.message || 'Error al procesar la operación');
     }
   };
 
@@ -77,6 +80,18 @@ function Suppliers() {
       isActive: true
     });
     setError('');
+  };
+
+  const handleDelete = async (id) => {
+    if (window.confirm('¿Está seguro de eliminar este proveedor?')) {
+      try {
+        await api.deleteSupplier(id);
+        toast.success('Proveedor eliminado exitosamente');
+        loadSuppliers();
+      } catch (error) {
+        toast.error(error.response?.data?.message || 'Error al eliminar el proveedor');
+      }
+    }
   };
 
   return (

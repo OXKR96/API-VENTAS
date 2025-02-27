@@ -1,222 +1,228 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../services/api';
+import { toast } from 'react-toastify';
 
 function Purchases() {
-  // Estados para la gestión de compras
   const [purchases, setPurchases] = useState([]);
   const [suppliers, setSuppliers] = useState([]);
   const [products, setProducts] = useState([]);
-  const [currentPurchase, setCurrentPurchase] = useState({
-    supplier: '',
-    items: [],
-    paymentMethod: 'Contado',
-    notes: '',
-    status: 'Completada'
-  });
-
-  // Estados para modales y errores
-  const [showModal, setShowModal] = useState(false);
-  const [showDetailsModal, setShowDetailsModal] = useState(false);
-  const [showQuickProductModal, setShowQuickProductModal] = useState(false);
-  const [error, setError] = useState('');
-
-  // Estados para la gestión de productos
-  const [selectedProduct, setSelectedProduct] = useState({
-    product: '',
-    quantity: 1,
-    costPrice: 0
-  });
   const [filteredProducts, setFilteredProducts] = useState([]);
+  const [searchTerm, setSearchTerm] = useState('');
   const [showProductSearch, setShowProductSearch] = useState(false);
-  const [selectedPurchase, setSelectedPurchase] = useState(null);
-  const [newProduct, setNewProduct] = useState({
-    name: '',
-    description: '',
-    price: '',
-    costPrice: '',
-    stock: '',
-    category: 'Otros',
-    minimumStock: '5'
-  });
+  const [selectedSupplier, setSelectedSupplier] = useState(null);
+  const [cart, setCart] = useState([]);
+  const [showModal, setShowModal] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState('Efectivo');
+  const [editingPurchase, setEditingPurchase] = useState(null);
+  const [selectedProduct, setSelectedProduct] = useState(null);
+  const [newCostPrice, setNewCostPrice] = useState('');
 
-  const paymentMethods = ['Contado', 'Crédito', 'Transferencia'];
-
-  // Cargar datos iniciales
   useEffect(() => {
     loadInitialData();
   }, []);
 
+  useEffect(() => {
+    if (searchTerm.length >= 2) {
+      const filtered = products.filter(product => 
+        product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        product._id.toString().includes(searchTerm)
+      );
+      setFilteredProducts(filtered);
+      setShowProductSearch(true);
+    } else {
+      setFilteredProducts([]);
+      setShowProductSearch(false);
+    }
+  }, [searchTerm, products]);
+
   const loadInitialData = async () => {
     try {
-      const [purchasesData, suppliersData, productsData] = await Promise.all([
-        api.getPurchases(),
+      const [productsRes, suppliersRes, purchasesRes] = await Promise.all([
+        api.getProducts(),
         api.getSuppliers(),
-        api.getProducts()
+        api.getPurchases()
       ]);
-
-      setPurchases(purchasesData.data);
-      setSuppliers(suppliersData.data.filter(s => s.isActive));
-      setProducts(productsData.data);
+      setProducts(productsRes.data);
+      setSuppliers(suppliersRes.data);
+      setPurchases(purchasesRes.data);
     } catch (error) {
-      setError('Error al cargar datos iniciales');
+      toast.error('Error al cargar los datos iniciales');
     }
   };
 
-  // Funciones para gestión de compras
+  const handleAddToCart = (product, price) => {
+    if (!price || isNaN(price) || price <= 0) {
+      toast.error('Por favor ingrese un precio de costo válido');
+      return;
+    }
+
+    const existingItem = cart.find(item => item._id === product._id);
+    if (existingItem) {
+      toast.warning('Este producto ya está en el carrito. Modifique su cantidad si desea más unidades.');
+      return;
+    }
+
+    setCart([...cart, { 
+      ...product, 
+      quantity: 1,
+      costPrice: parseFloat(price)
+    }]);
+    setSearchTerm('');
+    toast.success('Producto agregado al carrito');
+  };
+
+  const confirmAddToCart = () => {
+    if (!selectedProduct) return;
+    
+    if (!newCostPrice || isNaN(newCostPrice) || parseFloat(newCostPrice) <= 0) {
+      toast.error('Por favor ingrese un precio de costo válido mayor a 0');
+      return;
+    }
+
+    setCart([...cart, { 
+      ...selectedProduct, 
+      quantity: 1,
+      costPrice: parseFloat(newCostPrice)
+    }]);
+    setSearchTerm('');
+    setShowProductSearch(false);
+    setSelectedProduct(null);
+    setNewCostPrice('');
+    toast.success('Producto agregado al carrito');
+  };
+
+  const updateCartItemQuantity = (index, newQuantity) => {
+    if (newQuantity <= 0) {
+      toast.warning('La cantidad debe ser mayor a 0');
+      return;
+    }
+
+    const newCart = [...cart];
+    newCart[index].quantity = newQuantity;
+    setCart(newCart);
+  };
+
+  const updateCartItemPrice = (index, newPrice) => {
+    if (newPrice <= 0) {
+      toast.warning('El precio debe ser mayor a 0');
+      return;
+    }
+
+    const newCart = [...cart];
+    newCart[index].costPrice = newPrice;
+    setCart(newCart);
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
-      if (currentPurchase.items.length === 0) {
-        setError('Debe agregar al menos un producto');
+      if (!selectedSupplier) {
+        toast.warning('Por favor seleccione un proveedor');
+        return;
+      }
+
+      if (cart.length === 0) {
+        toast.warning('Agregue al menos un producto al carrito');
+        return;
+      }
+
+      // Validar que todos los productos tengan precio de costo
+      const invalidItems = cart.filter(item => !item.costPrice || item.costPrice <= 0);
+      if (invalidItems.length > 0) {
+        toast.error('Todos los productos deben tener un precio de costo válido');
         return;
       }
 
       const purchaseData = {
-        ...currentPurchase,
-        totalAmount: currentPurchase.items.reduce((sum, item) => 
-          sum + (item.quantity * item.costPrice), 0
-        )
+        supplier: selectedSupplier._id,
+        items: cart.map(item => ({
+          product: item._id,
+          quantity: parseInt(item.quantity),
+          costPrice: parseFloat(item.costPrice),
+          name: item.name
+        })),
+        totalAmount: cart.reduce((sum, item) => sum + (parseFloat(item.costPrice) * parseInt(item.quantity)), 0),
+        paymentMethod,
+        status: 'Completada'
       };
 
-      await api.createPurchase(purchaseData);
+      if (editingPurchase) {
+        await api.updatePurchase(editingPurchase._id, purchaseData);
+        toast.success('Compra actualizada exitosamente');
+      } else {
+        await api.createPurchase(purchaseData);
+        toast.success('Compra registrada exitosamente');
+      }
+
       setShowModal(false);
       loadInitialData();
       resetForm();
     } catch (error) {
-      setError(error.response?.data?.message || 'Error al guardar la compra');
+      console.error('Error al procesar la compra:', error);
+      toast.error(error.response?.data?.message || 'Error al procesar la compra');
     }
   };
 
-  const handleViewDetails = async (id) => {
-    try {
-      const response = await api.getPurchaseById(id);
-      setSelectedPurchase(response.data);
-      setShowDetailsModal(true);
-    } catch (error) {
-      setError('Error al cargar los detalles de la compra');
+  const handleCancelPurchase = async (id) => {
+    if (window.confirm('¿Está seguro de cancelar esta compra? El stock de los productos será actualizado.')) {
+      try {
+        await api.cancelPurchase(id);
+        toast.success('Compra cancelada exitosamente');
+        loadInitialData();
+      } catch (error) {
+        toast.error(error.response?.data?.message || 'Error al cancelar la compra');
+      }
     }
   };
 
-  // Funciones para gestión de productos en la compra
-  const handleAddItem = () => {
-    if (!selectedProduct.product || selectedProduct.quantity <= 0 || selectedProduct.costPrice <= 0) {
-      setError('Por favor complete todos los campos del producto');
-      return;
-    }
-
-    const product = products.find(p => p._id === selectedProduct.product);
-    
-    setCurrentPurchase(prev => ({
-      ...prev,
-      items: [...prev.items, {
-        ...selectedProduct,
-        productName: product.name,
-        subtotal: selectedProduct.quantity * selectedProduct.costPrice
-      }]
-    }));
-
-    setSelectedProduct({
-      product: '',
-      quantity: 1,
-      costPrice: 0
-    });
-    setShowProductSearch(false);
-  };
-
-  const handleRemoveItem = (index) => {
-    setCurrentPurchase(prev => ({
-      ...prev,
-      items: prev.items.filter((_, i) => i !== index)
-    }));
-  };
-
-  const handleQuickProductSubmit = async (e) => {
-    e.preventDefault();
-    try {
-      const productData = {
-        ...newProduct,
-        price: Number(newProduct.price),
-        costPrice: Number(newProduct.costPrice),
-        stock: Number(newProduct.stock),
-        minimumStock: Number(newProduct.minimumStock)
-      };
-
-      const response = await api.createProduct(productData);
-      const createdProduct = response.data;
-      
-      setProducts([...products, createdProduct]);
-      setSelectedProduct({
-        product: createdProduct._id,
-        quantity: 1,
-        costPrice: createdProduct.costPrice
-      });
-      
-      setShowQuickProductModal(false);
-      setNewProduct({
-        name: '',
-        description: '',
-        price: '',
-        costPrice: '',
-        stock: '',
-        category: 'Otros',
-        minimumStock: '5'
-      });
-    } catch (error) {
-      setError('Error al crear el producto');
-    }
+  const handleEditPurchase = (purchase) => {
+    setEditingPurchase(purchase);
+    setSelectedSupplier(purchase.supplier);
+    setPaymentMethod(purchase.paymentMethod);
+    setCart(purchase.items.map(item => ({
+      ...item,
+      _id: item.product
+    })));
+    setShowModal(true);
   };
 
   const resetForm = () => {
-    setCurrentPurchase({
-      supplier: '',
-      items: [],
-      paymentMethod: 'Contado',
-      notes: '',
-      status: 'Completada'
-    });
-    setSelectedProduct({
-      product: '',
-      quantity: 1,
-      costPrice: 0
-    });
-    setError('');
+    setCart([]);
+    setSelectedSupplier(null);
+    setPaymentMethod('Efectivo');
+    setEditingPurchase(null);
+    setSearchTerm('');
     setShowProductSearch(false);
   };
 
   const formatDate = (dateString) => {
-    return new Date(dateString).toLocaleDateString('es-ES', {
-      year: 'numeric',
-      month: 'long',
+    const options = { 
+      year: 'numeric', 
+      month: 'long', 
       day: 'numeric',
       hour: '2-digit',
       minute: '2-digit'
-    });
+    };
+    return new Date(dateString).toLocaleDateString('es-ES', options);
   };
 
   return (
     <div className="container mt-4">
       <div className="d-flex justify-content-between mb-4">
         <h2>Compras</h2>
-        <button 
-          className="btn btn-primary" 
-          onClick={() => {
-            resetForm();
-            setShowModal(true);
-          }}
-        >
+        <button className="btn btn-primary" onClick={() => setShowModal(true)}>
           Nueva Compra
         </button>
       </div>
 
-      {error && <div className="alert alert-danger">{error}</div>}
-
       {/* Tabla de compras */}
       <div className="table-responsive">
-        <table className="table">
+        <table className="table table-striped">
           <thead>
             <tr>
               <th>Fecha</th>
               <th>Proveedor</th>
+              <th>Productos</th>
               <th>Total</th>
               <th>Método de Pago</th>
               <th>Estado</th>
@@ -224,28 +230,43 @@ function Purchases() {
             </tr>
           </thead>
           <tbody>
-            {purchases.map(purchase => (
+            {purchases.map((purchase) => (
               <tr key={purchase._id}>
                 <td>{formatDate(purchase.createdAt)}</td>
                 <td>{purchase.supplier?.name}</td>
-                <td>${purchase.totalAmount?.toLocaleString()}</td>
+                <td>
+                  <ul className="list-unstyled mb-0">
+                    {purchase.items.map((item, index) => (
+                      <li key={index}>
+                        {item.quantity}x {item.name} - ${item.price}
+                      </li>
+                    ))}
+                  </ul>
+                </td>
+                <td>${purchase.totalAmount}</td>
                 <td>{purchase.paymentMethod}</td>
                 <td>
-                  <span className={`badge ${
-                    purchase.status === 'Completada' ? 'bg-success' : 
-                    purchase.status === 'Pendiente' ? 'bg-warning' : 
-                    'bg-danger'
-                  }`}>
+                  <span className={`badge ${purchase.status === 'Completada' ? 'bg-success' : 'bg-warning'}`}>
                     {purchase.status}
                   </span>
                 </td>
                 <td>
-                  <button 
-                    className="btn btn-sm btn-info me-2"
-                    onClick={() => handleViewDetails(purchase._id)}
-                  >
-                    Ver Detalles
-                  </button>
+                  <div className="btn-group">
+                    <button
+                      className="btn btn-sm btn-outline-primary"
+                      onClick={() => handleEditPurchase(purchase)}
+                      title="Editar compra"
+                    >
+                      <i className="fas fa-edit"></i>
+                    </button>
+                    <button
+                      className="btn btn-sm btn-outline-danger ms-1"
+                      onClick={() => handleCancelPurchase(purchase._id)}
+                      title="Cancelar compra"
+                    >
+                      <i className="fas fa-ban"></i>
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
@@ -253,16 +274,18 @@ function Purchases() {
         </table>
       </div>
 
-      {/* Modal de Nueva Compra */}
+      {/* Modal de compra */}
       {showModal && (
         <div className="modal show d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
           <div className="modal-dialog modal-lg">
             <div className="modal-content">
               <div className="modal-header">
-                <h5 className="modal-title">Nueva Compra</h5>
-                <button 
-                  type="button" 
-                  className="btn-close" 
+                <h5 className="modal-title">
+                  {editingPurchase ? 'Editar Compra' : 'Nueva Compra'}
+                </h5>
+                <button
+                  type="button"
+                  className="btn-close"
                   onClick={() => {
                     setShowModal(false);
                     resetForm();
@@ -270,407 +293,193 @@ function Purchases() {
                 ></button>
               </div>
               <div className="modal-body">
-                <form onSubmit={handleSubmit}>
-                  <div className="mb-3">
-                    <label className="form-label">Proveedor *</label>
-                    <select
-                      className="form-select"
-                      value={currentPurchase.supplier}
-                      onChange={(e) => setCurrentPurchase({
-                        ...currentPurchase,
-                        supplier: e.target.value
-                      })}
-                      required
-                    >
-                      <option value="">Seleccionar proveedor</option>
-                      {suppliers.map(supplier => (
-                        <option key={supplier._id} value={supplier._id}>
-                          {supplier.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
+                {/* Selección de proveedor */}
+                <div className="mb-3">
+                  <label className="form-label">Proveedor</label>
+                  <select
+                    className="form-select"
+                    value={selectedSupplier?._id || ''}
+                    onChange={(e) => {
+                      const supplier = suppliers.find(s => s._id === e.target.value);
+                      setSelectedSupplier(supplier || null);
+                    }}
+                    required
+                  >
+                    <option value="">Seleccionar proveedor...</option>
+                    {suppliers.map(supplier => (
+                      <option key={supplier._id} value={supplier._id}>
+                        {supplier.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
-                  <div className="card mb-3">
-                    <div className="card-header">
-                      <h6 className="mb-0">Agregar Productos</h6>
-                    </div>
-                    <div className="card-body">
-                      <div className="row mb-3">
-                        <div className="col-md-12">
-                          <div className="dropdown">
-                            <input
-                              type="text"
-                              className="form-control"
-                              placeholder="Buscar producto..."
-                              onChange={(e) => {
-                                const searchTerm = e.target.value.toLowerCase();
-                                const filteredProducts = products.filter(p => 
-                                  p.name.toLowerCase().includes(searchTerm)
-                                );
-                                setFilteredProducts(filteredProducts);
-                                setShowProductSearch(searchTerm.length > 0);
-                              }}
-                            />
-                            {showProductSearch && (
-                              <div className="dropdown-menu show w-100">
-                                {filteredProducts.map(product => (
-                                  <button
-                                    key={product._id}
-                                    className="dropdown-item"
-                                    type="button"
-                                    onClick={() => {
-                                      setSelectedProduct({
-                                        product: product._id,
-                                        quantity: 1,
-                                        costPrice: product.costPrice
-                                      });
-                                      setShowProductSearch(false);
-                                    }}
-                                  >
-                                    {product.name} - Stock: {product.stock}
-                                  </button>
-                                ))}
-                                <div className="dropdown-divider"></div>
-                                <button
-                                  className="dropdown-item text-primary"
-                                  type="button"
-                                  onClick={() => {
-                                    setShowQuickProductModal(true);
-                                    setShowProductSearch(false);
-                                  }}
-                                >
-                                  + Crear Nuevo Producto
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </div>
+                {/* Método de pago */}
+                <div className="mb-3">
+                  <label className="form-label">Método de Pago</label>
+                  <select
+                    className="form-select"
+                    value={paymentMethod}
+                    onChange={(e) => setPaymentMethod(e.target.value)}
+                  >
+                    <option value="Efectivo">Efectivo</option>
+                    <option value="Transferencia">Transferencia</option>
+                    <option value="Crédito">Crédito</option>
+                  </select>
+                </div>
 
-                      {selectedProduct.product && (
-                        <div className="row mb-3 align-items-end">
-                          <div className="col-md-4">
-                            <label className="form-label">Producto Seleccionado</label>
-                            <input
-                              type="text"
-                              className="form-control"
-                              value={products.find(p => p._id === selectedProduct.product)?.name || ''}
-                              disabled
-                            />
-                          </div>
-                          <div className="col-md-3">
-                            <label className="form-label">Cantidad</label>
-                            <input
-                              type="number"
-                              className="form-control"
-                              value={selectedProduct.quantity}
-                              onChange={(e) => setSelectedProduct({
-                                ...selectedProduct,
-                                quantity: parseInt(e.target.value)
-                              })}
-                              min="1"
-                            />
-                          </div>
-                          <div className="col-md-3">
-                            <label className="form-label">Precio Costo</label>
-                            <input
-                              type="number"
-                              className="form-control"
-                              value={selectedProduct.costPrice}
-                              onChange={(e) => setSelectedProduct({
-                                ...selectedProduct,
-                                costPrice: parseFloat(e.target.value)
-                              })}
-                              min="0"
-                              step="0.01"
-                            />
-                          </div>
-                          <div className="col-md-2">
-                            <button
-                              type="button"
-                              className="btn btn-success w-100"
-                              onClick={handleAddItem}
-                            >
-                              Agregar
-                            </button>
-                          </div>
-                        </div>
-                      )}
-
-                      <table className="table">
-                        <thead>
-                          <tr>
-                            <th>Producto</th>
-                            <th>Cantidad</th>
-                            <th>Precio</th>
-                            <th>Subtotal</th>
-                            <th>Acciones</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {currentPurchase.items.map((item, index) => (
-                            <tr key={index}>
-                              <td>{item.productName}</td>
-                              <td>{item.quantity}</td>
-                              <td>${item.costPrice.toLocaleString()}</td>
-                              <td>${(item.quantity * item.costPrice).toLocaleString()}</td>
-                              <td>
-                                <button
-                                  type="button"
-                                  className="btn btn-danger btn-sm"
-                                  onClick={() => handleRemoveItem(index)}
-                                >
-                                  Eliminar
-                                </button>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                        <tfoot>
-                          <tr>
-                            <td colSpan="3" className="text-end"><strong>Total:</strong></td>
-                            <td colSpan="2">
-                              <strong>
-                                ${currentPurchase.items.reduce((sum, item) => 
-                                  sum + (item.quantity * item.costPrice), 0
-                                ).toLocaleString()}
-                              </strong>
-                            </td>
-                          </tr>
-                        </tfoot>
-                      </table>
-                    </div>
-                  </div>
-
-                  <div className="row">
-                    <div className="col-md-6">
-                      <div className="mb-3">
-                        <label className="form-label">Método de Pago</label>
-                        <select
-                          className="form-select"
-                          value={currentPurchase.paymentMethod}
-                          onChange={(e) => setCurrentPurchase({
-                            ...currentPurchase,
-                            paymentMethod: e.target.value
-                          })}
-                        >
-                          {paymentMethods.map(method => (
-                            <option key={method} value={method}>{method}</option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="mb-3">
-                    <label className="form-label">Notas</label>
-                    <textarea
-                      className="form-control"
-                      value={currentPurchase.notes}
-                      onChange={(e) => setCurrentPurchase({
-                        ...currentPurchase,
-                        notes: e.target.value
-                      })}
-                      rows="3"
-                    />
-                  </div>
-
-                  <button type="submit" className="btn btn-primary w-100">
-                    Crear Compra
-                  </button>
-                </form>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal de Producto Rápido */}
-      {showQuickProductModal && (
-        <div className="modal show d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
-          <div className="modal-dialog">
-            <div className="modal-content">
-              <div className="modal-header">
-                <h5 className="modal-title">Producto Rápido</h5>
-                <button 
-                  type="button" 
-                  className="btn-close" 
-                  onClick={() => setShowQuickProductModal(false)}
-                ></button>
-              </div>
-              <div className="modal-body">
-                <form onSubmit={handleQuickProductSubmit}>
-                  <div className="mb-3">
-                    <label className="form-label">Nombre *</label>
+                {/* Búsqueda de productos */}
+                <div className="mb-3">
+                  <div className="input-group">
+                    <span className="input-group-text">
+                      <i className="fas fa-search"></i>
+                    </span>
                     <input
                       type="text"
                       className="form-control"
-                      value={newProduct.name}
-                      onChange={(e) => setNewProduct({
-                        ...newProduct,
-                        name: e.target.value
-                      })}
-                      required
+                      placeholder="Buscar producto por nombre o código..."
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      autoFocus
                     />
                   </div>
 
-                  <div className="mb-3">
-                    <label className="form-label">Descripción</label>
-                    <textarea
-                      className="form-control"
-                      value={newProduct.description}
-                      onChange={(e) => setNewProduct({
-                        ...newProduct,
-                        description: e.target.value
-                      })}
-                    />
-                  </div>
-
-                  <div className="row">
-                    <div className="col-md-6 mb-3">
-                      <label className="form-label">Precio Venta *</label>
-                      <input
-                        type="number"
-                        className="form-control"
-                        value={newProduct.price}
-                        onChange={(e) => setNewProduct({
-                          ...newProduct,
-                          price: e.target.value
-                        })}
-                        required
-                        min="0"
-                        step="0.01"
-                      />
+                  {showProductSearch && (
+                    <div className="list-group position-absolute w-100 shadow-lg" style={{ maxHeight: '300px', overflowY: 'auto', zIndex: 1000 }}>
+                      {filteredProducts.map(product => (
+                        <div 
+                          key={product._id}
+                          className="list-group-item list-group-item-action"
+                          style={{ cursor: 'pointer' }}
+                        >
+                          <div className="row align-items-center g-2">
+                            <div className="col">
+                              <div className="d-flex justify-content-between">
+                                <strong>{product.name}</strong>
+                                <span className="badge bg-info">
+                                  Precio actual: ${product.costPrice || 0}
+                                </span>
+                              </div>
+                              <div className="d-flex justify-content-between">
+                                <small className="text-muted">Código: {product._id}</small>
+                                <small className="text-muted">Stock: {product.stock}</small>
+                              </div>
+                            </div>
+                            <div className="col-auto">
+                              <div className="input-group input-group-sm">
+                                <span className="input-group-text">$</span>
+                                <input
+                                  type="number"
+                                  className="form-control"
+                                  placeholder="Nuevo precio"
+                                  defaultValue={product.costPrice || ''}
+                                  style={{ width: '120px' }}
+                                  min="0.01"
+                                  step="0.01"
+                                  id={`price-input-${product._id}`}
+                                  onClick={(e) => e.stopPropagation()}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                      e.preventDefault();
+                                      const price = parseFloat(e.target.value);
+                                      if (price > 0) {
+                                        handleAddToCart(product, price);
+                                      } else {
+                                        toast.error('Ingrese un precio válido');
+                                      }
+                                    }
+                                  }}
+                                />
+                                <button 
+                                  className="btn btn-outline-primary"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    const priceInput = document.getElementById(`price-input-${product._id}`);
+                                    const price = parseFloat(priceInput.value);
+                                    handleAddToCart(product, price);
+                                  }}
+                                >
+                                  <i className="fas fa-plus"></i>
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
                     </div>
-                    <div className="col-md-6 mb-3">
-                      <label className="form-label">Precio Costo *</label>
-                      <input
-                        type="number"
-                        className="form-control"
-                        value={newProduct.costPrice}
-                        onChange={(e) => setNewProduct({
-                          ...newProduct,
-                          costPrice: e.target.value
-                        })}
-                        required
-                        min="0"
-                        step="0.01"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="row">
-                    <div className="col-md-6 mb-3">
-                      <label className="form-label">Stock Inicial *</label>
-                      <input
-                        type="number"
-                        className="form-control"
-                        value={newProduct.stock}
-                        onChange={(e) => setNewProduct({
-                          ...newProduct,
-                          stock: e.target.value
-                        })}
-                        required
-                        min="0"
-                      />
-                    </div>
-                    <div className="col-md-6 mb-3">
-                      <label className="form-label">Stock Mínimo</label>
-                      <input
-                        type="number"
-                        className="form-control"
-                        value={newProduct.minimumStock}
-                        onChange={(e) => setNewProduct({
-                          ...newProduct,
-                          minimumStock: e.target.value
-                        })}
-                        min="0"
-                      />
-                    </div>
-                  </div>
-
-                  <button type="submit" className="btn btn-primary w-100">
-                    Crear y Seleccionar
-                  </button>
-                </form>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal de Detalles de Compra */}
-      {showDetailsModal && selectedPurchase && (
-        <div className="modal show d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
-          <div className="modal-dialog modal-lg">
-            <div className="modal-content">
-              <div className="modal-header">
-                <h5 className="modal-title">Detalles de la Compra</h5>
-                <button 
-                  type="button" 
-                  className="btn-close" 
-                  onClick={() => {
-                    setShowDetailsModal(false);
-                    setSelectedPurchase(null);
-                  }}
-                ></button>
-              </div>
-              <div className="modal-body">
-                <div className="row mb-3">
-                  <div className="col-md-6">
-                    <h6>Información de la Compra</h6>
-                    <p><strong>Fecha:</strong> {formatDate(selectedPurchase.createdAt)}</p>
-                    <p><strong>Proveedor:</strong> {selectedPurchase.supplier?.name}</p>
-                    <p><strong>Método de Pago:</strong> {selectedPurchase.paymentMethod}</p>
-                    <p><strong>Estado:</strong> {selectedPurchase.status}</p>
-                  </div>
-                  <div className="col-md-6">
-                    <h6>Notas</h6>
-                    <p>{selectedPurchase.notes || 'Sin notas'}</p>
-                  </div>
+                  )}
                 </div>
 
-                <h6>Productos</h6>
+                {/* Carrito de compra */}
                 <table className="table">
                   <thead>
                     <tr>
                       <th>Producto</th>
                       <th>Cantidad</th>
-                      <th>Precio</th>
+                      <th>Precio Costo</th>
                       <th>Subtotal</th>
+                      <th>Acciones</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {selectedPurchase.items.map((item, index) => (
+                    {cart.map((item, index) => (
                       <tr key={index}>
-                        <td>{item.productName}</td>
-                        <td>{item.quantity}</td>
-                        <td>${item.costPrice.toLocaleString()}</td>
-                        <td>${(item.quantity * item.costPrice).toLocaleString()}</td>
+                        <td>{item.name}</td>
+                        <td>
+                          <input
+                            type="number"
+                            className="form-control form-control-sm"
+                            value={item.quantity}
+                            onChange={(e) => updateCartItemQuantity(index, parseInt(e.target.value))}
+                            min="1"
+                          />
+                        </td>
+                        <td>
+                          <input
+                            type="number"
+                            className="form-control form-control-sm"
+                            value={item.costPrice}
+                            onChange={(e) => updateCartItemPrice(index, parseFloat(e.target.value))}
+                            min="0.01"
+                            step="0.01"
+                          />
+                        </td>
+                        <td>${(item.costPrice * item.quantity).toFixed(2)}</td>
+                        <td>
+                          <button
+                            className="btn btn-danger btn-sm"
+                            onClick={() => {
+                              const newCart = cart.filter((_, i) => i !== index);
+                              setCart(newCart);
+                              toast.info('Producto eliminado del carrito');
+                            }}
+                          >
+                            <i className="fas fa-trash"></i>
+                          </button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
                   <tfoot>
                     <tr>
-                      <td colSpan="3" className="text-end"><strong>Total:</strong></td>
-                      <td>
-                        <strong>${selectedPurchase.totalAmount.toLocaleString()}</strong>
+                      <td colSpan="3" className="text-end">
+                        <strong>Total:</strong>
+                      </td>
+                      <td colSpan="2">
+                        <strong>
+                          ${cart.reduce((sum, item) => sum + (item.costPrice * item.quantity), 0).toFixed(2)}
+                        </strong>
                       </td>
                     </tr>
                   </tfoot>
                 </table>
-              </div>
-              <div className="modal-footer">
-                <button 
-                  type="button" 
-                  className="btn btn-secondary" 
-                  onClick={() => {
-                    setShowDetailsModal(false);
-                    setSelectedPurchase(null);
-                  }}
+
+                <button
+                  className="btn btn-primary w-100"
+                  onClick={handleSubmit}
+                  disabled={cart.length === 0 || !selectedSupplier}
                 >
-                  Cerrar
+                  {editingPurchase ? 'Actualizar Compra' : 'Registrar Compra'}
                 </button>
               </div>
             </div>

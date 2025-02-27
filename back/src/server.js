@@ -13,6 +13,8 @@ const productRoutes = require('./routes/productRoutes');
 const saleRoutes = require('./routes/saleRoutes');
 const purchaseRoutes = require('./routes/purchaseRoutes');
 const supplierRoutes = require('./routes/supplierRoutes');
+const customerRoutes = require('./routes/customerRoutes');
+const statsRoutes = require('./routes/statsRoutes');
 
 const app = express();
 
@@ -60,6 +62,8 @@ app.use('/api/products', productRoutes);
 app.use('/api/sales', saleRoutes);
 app.use('/api/purchases', purchaseRoutes);
 app.use('/api/suppliers', supplierRoutes);
+app.use('/api/customers', customerRoutes);
+app.use('/api/stats', statsRoutes);
 
 // Ruta principal
 app.get('/', (req, res) => {
@@ -88,7 +92,7 @@ app.use((err, req, res, next) => {
 });
 
 // Puerto del servidor
-const PORT = process.env.PORT || 5000;
+const PORT = process.env.PORT || 3001;
 
 // Iniciar servidor
 const server = app.listen(PORT, () => {

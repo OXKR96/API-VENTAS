@@ -93,15 +93,38 @@ export const api = {
 
   // Sales
   createSale: async (sale) => {
-    const { data } = await axios.post(`${API_URL}/sales`, {
-      ...sale,
-      status: 'Completada',
-      taxDetails: {
-        taxRate: 0.19,
-        subtotal: sale.items.reduce((sum, item) => sum + (item.price * item.quantity), 0)
-      }
-    });
-    return data;
+    try {
+      const saleData = {
+        ...sale,
+        status: 'Completada',
+        taxDetails: {
+          taxRate: 0.19,
+          subtotal: sale.totalAmount,
+          taxAmount: sale.totalAmount * 0.19,
+          total: sale.totalAmount * 1.19
+        }
+      };
+      console.log('Datos de venta a enviar:', saleData);
+      const { data } = await axios.post(`${API_URL}/sales`, saleData);
+      return data;
+    } catch (error) {
+      console.error('Error en createSale:', error.response?.data || error);
+      throw error;
+    }
+  },
+
+  updateSale: async (id, sale) => {
+    try {
+      const saleData = {
+        ...sale,
+        status: 'Completada'
+      };
+      const { data } = await axios.put(`${API_URL}/sales/${id}`, saleData);
+      return data;
+    } catch (error) {
+      console.error('Error en updateSale:', error.response?.data || error);
+      throw error;
+    }
   },
 
   getSales: async () => {
@@ -120,12 +143,17 @@ export const api = {
   },
 
   cancelSale: async (id) => {
-    const { data } = await axios.delete(`${API_URL}/sales/${id}`);
-    return data;
+    try {
+      const { data } = await axios.delete(`${API_URL}/sales/${id}/cancel`);
+      return data;
+    } catch (error) {
+      console.error('Error en cancelSale:', error.response?.data || error);
+      throw error;
+    }
   },
 
   getSalesStats: async () => {
-    const { data } = await axios.get(`${API_URL}/sales/stats`);
+    const { data } = await axios.get(`${API_URL}/stats/sales`);
     return data;
   },
 
@@ -184,24 +212,72 @@ export const api = {
   // Dashboard
   getStats: async () => {
     try {
-      const [products, sales] = await Promise.all([
-        axios.get(`${API_URL}/products/count`),
-        axios.get(`${API_URL}/sales/stats`)
+      const [salesStats, debtStats, inventoryStats] = await Promise.all([
+        axios.get(`${API_URL}/stats/sales`),
+        axios.get(`${API_URL}/stats/debt`),
+        axios.get(`${API_URL}/stats/inventory`)
       ]);
       return {
-        totalProducts: products.data.count,
-        lowStockProducts: products.data.lowStockCount,
-        totalSales: sales.data.totalSales,
-        totalRevenue: sales.data.totalRevenue
+        salesStats: salesStats.data,
+        debtStats: debtStats.data,
+        inventoryStats: inventoryStats.data
       };
     } catch (error) {
       console.error('Error getting stats:', error);
-      return {
-        totalProducts: 0,
-        lowStockProducts: 0,
-        totalSales: 0,
-        totalRevenue: 0
-      };
+      throw error;
     }
-  }
+  },
+
+  // Customers
+  getCustomers: async (filters = {}) => {
+    const queryParams = new URLSearchParams(filters).toString();
+    const { data } = await axios.get(`${API_URL}/customers${queryParams ? `?${queryParams}` : ''}`);
+    return data;
+  },
+
+  createCustomer: async (customer) => {
+    const { data } = await axios.post(`${API_URL}/customers`, customer);
+    return data;
+  },
+
+  updateCustomer: async (id, customer) => {
+    const { data } = await axios.put(`${API_URL}/customers/${id}`, customer);
+    return data;
+  },
+
+  deleteCustomer: async (id) => {
+    const { data } = await axios.delete(`${API_URL}/customers/${id}`);
+    return data;
+  },
+
+  getCustomerById: async (id) => {
+    const { data } = await axios.get(`${API_URL}/customers/${id}`);
+    return data;
+  },
+
+  getCustomerPendingSales: async (customerId) => {
+    const { data } = await axios.get(`${API_URL}/customers/${customerId}/pending-sales`);
+    return data;
+  },
+
+  registerCustomerPayment: async (customerId, paymentData) => {
+    const { data } = await axios.post(`${API_URL}/customers/${customerId}/payments`, paymentData);
+    return data;
+  },
+
+  getCustomerPaymentHistory: async (customerId) => {
+    const { data } = await axios.get(`${API_URL}/customers/${customerId}/payments`);
+    return data;
+  },
+
+  getDebtStats: async () => {
+    const { data } = await axios.get(`${API_URL}/stats/debt`);
+    return data;
+  },
+
+  // Estadísticas
+  getInventoryStats: async () => {
+    const { data } = await axios.get(`${API_URL}/stats/inventory`);
+    return data;
+  },
 };

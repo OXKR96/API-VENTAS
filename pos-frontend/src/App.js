@@ -1,61 +1,32 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import Navbar from './components/Navbar';
-import Login from './components/login';
+import { ToastContainer } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
+import Login from './components/Login';
 import Dashboard from './components/Dashboard';
 import Products from './components/Products';
 import Sales from './components/Sales';
-import Suppliers from './components/Suppliers';
 import Purchases from './components/Purchases';
-
-const ProtectedRoute = ({ children }) => {
-  const token = localStorage.getItem('token');
-  if (!token) {
-    return <Navigate to="/login" />;
-  }
-  return (
-    <>
-      <Navbar />
-      {children}
-    </>
-  );
-};
+import Suppliers from './components/Suppliers';
+import Customers from './components/Customers';
+import Layout from './components/Layout';
+import PrivateRoute from './components/PrivateRoute';
 
 function App() {
   return (
     <Router>
+      <ToastContainer />
       <Routes>
         <Route path="/login" element={<Login />} />
-        <Route path="/dashboard" element={
-          <ProtectedRoute>
-            <Dashboard />
-          </ProtectedRoute>
-        } />
-        <Route path="/products" element={
-          <ProtectedRoute>
-            <Products />
-          </ProtectedRoute>
-        } />
-        <Route path="/sales" element={
-          <ProtectedRoute>
-            <Sales />
-          </ProtectedRoute>
-        } />
-
-        <Route path="/purchases" element={
-        <ProtectedRoute>
-            <Purchases />
-        </ProtectedRoute>
-        } />
-
-
-        <Route path="/suppliers" element={
-          <ProtectedRoute>
-            <Suppliers />
-          </ProtectedRoute>
-        } />
-
-        <Route path="/" element={<Navigate to="/dashboard" />} />
+        <Route path="/" element={<PrivateRoute><Layout /></PrivateRoute>}>
+          <Route index element={<Navigate to="/dashboard" replace />} />
+          <Route path="dashboard" element={<Dashboard />} />
+          <Route path="products" element={<Products />} />
+          <Route path="sales" element={<Sales />} />
+          <Route path="purchases" element={<Purchases />} />
+          <Route path="suppliers" element={<Suppliers />} />
+          <Route path="customers" element={<Customers />} />
+        </Route>
       </Routes>
     </Router>
   );

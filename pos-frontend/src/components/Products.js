@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../services/api';
+import { toast } from 'react-toastify';
 
 function Products() {
   const [products, setProducts] = useState([]);
@@ -54,14 +55,16 @@ function Products() {
 
       if (currentProduct._id) {
         await api.updateProduct(currentProduct._id, productData);
+        toast.success('Producto actualizado exitosamente');
       } else {
         await api.createProduct(productData);
+        toast.success('Producto creado exitosamente');
       }
       setShowModal(false);
       loadProducts();
       resetForm();
     } catch (error) {
-      setError(error.response?.data?.message || 'Error al guardar el producto');
+      toast.error(error.response?.data?.message || 'Error al procesar la operación');
     }
   };
 
@@ -69,9 +72,10 @@ function Products() {
     if (window.confirm('¿Estás seguro de que quieres eliminar este producto?')) {
       try {
         await api.deleteProduct(id);
+        toast.success('Producto eliminado exitosamente');
         loadProducts();
       } catch (error) {
-        setError('Error al eliminar el producto');
+        toast.error(error.response?.data?.message || 'Error al eliminar el producto');
       }
     }
   };

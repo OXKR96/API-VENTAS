@@ -33,6 +33,7 @@ function Login() {
                     placeholder="Email"
                     value={credentials.email}
                     onChange={(e) => setCredentials({...credentials, email: e.target.value})}
+                    required
                   />
                 </div>
                 <div className="mb-3">
@@ -42,6 +43,7 @@ function Login() {
                     placeholder="Contraseña"
                     value={credentials.password}
                     onChange={(e) => setCredentials({...credentials, password: e.target.value})}
+                    required
                   />
                 </div>
                 <button type="submit" className="btn btn-primary w-100">
@@ -56,4 +58,4 @@ function Login() {
   );
 }
 
-export default Login;
+export default Login; 

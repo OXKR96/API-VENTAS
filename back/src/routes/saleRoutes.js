@@ -6,7 +6,8 @@ const {
   getSaleById,
   cancelSale,
   getSalesByDateRange,
-  getSalesStats
+  getSalesStats,
+  updateSale
 } = require('../controllers/saleController');
 const { protect, authorize } = require('../middlewares/authMiddleware');
 
@@ -19,6 +20,7 @@ router.route('/')
 router.get('/stats', protect, getSalesStats);
 router.get('/date-range', protect, getSalesByDateRange);
 router.get('/:id', protect, getSaleById);
-router.delete('/:id', protect, authorize('admin', 'manager'), cancelSale);
+router.put('/:id', protect, authorize('admin', 'manager'), updateSale);
+router.put('/:id/cancel', protect, authorize('admin', 'manager'), cancelSale);
 
 module.exports = router;
