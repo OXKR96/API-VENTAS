@@ -27,6 +27,11 @@ const PurchaseItemSchema = new mongoose.Schema({
 });
 
 const PurchaseSchema = new mongoose.Schema({
+  purchaseNumber: {
+    type: Number,
+    required: true,
+    unique: true
+  },
   supplier: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Supplier',
@@ -45,12 +50,12 @@ const PurchaseSchema = new mongoose.Schema({
   },
   paymentMethod: {
     type: String,
-    enum: ['Contado', 'Crédito', 'Transferencia'],
+    enum: ['Efectivo', 'Transferencia', 'Crédito'],
     required: true
   },
   status: {
     type: String,
-    enum: ['Pendiente', 'Completada', 'Cancelada'],
+    enum: ['Completada', 'Cancelada'],
     default: 'Completada'
   },
   notes: String,
@@ -60,6 +65,15 @@ const PurchaseSchema = new mongoose.Schema({
   }
 }, {
   timestamps: true
+});
+
+// Middleware para auto-incrementar el purchaseNumber
+PurchaseSchema.pre('save', async function(next) {
+  if (this.isNew) {
+    const lastPurchase = await this.constructor.findOne({}, {}, { sort: { purchaseNumber: -1 } });
+    this.purchaseNumber = lastPurchase ? lastPurchase.purchaseNumber + 1 : 1;
+  }
+  next();
 });
 
 module.exports = mongoose.model('Purchase', PurchaseSchema);

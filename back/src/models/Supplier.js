@@ -1,9 +1,9 @@
 const mongoose = require('mongoose');
 
-const SupplierSchema = new mongoose.Schema({
+const supplierSchema = new mongoose.Schema({
   name: {
     type: String,
-    required: [true, 'Por favor ingresa el nombre del proveedor'],
+    required: [true, 'El nombre es requerido'],
     trim: true
   },
   contactName: {
@@ -12,10 +12,8 @@ const SupplierSchema = new mongoose.Schema({
   },
   email: {
     type: String,
-    unique: true,
-    sparse: true,
-    lowercase: true,
-    match: [/^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/, 'Por favor ingresa un correo electrónico válido']
+    trim: true,
+    lowercase: true
   },
   phone: {
     type: String,
@@ -27,12 +25,30 @@ const SupplierSchema = new mongoose.Schema({
   },
   taxId: {
     type: String,
-    unique: true,
-    sparse: true
+    required: [true, 'El CC/NIT es requerido'],
+    trim: true,
+    unique: true
   },
   paymentTerms: {
     type: String,
-    enum: ['Contado', '15 días', '30 días', '60 días']
+    required: [true, 'Los términos de pago son requeridos'],
+    enum: {
+      values: [
+        'Contado',
+        '7 días',
+        '15 días',
+        '21 días',
+        '30 días',
+        '45 días',
+        '60 días',
+        '90 días',
+        'Fin de mes',
+        'Contra entrega',
+        'Pago anticipado'
+      ],
+      message: 'Términos de pago no válidos'
+    },
+    default: 'Contado'
   },
   isActive: {
     type: Boolean,
@@ -42,4 +58,11 @@ const SupplierSchema = new mongoose.Schema({
   timestamps: true
 });
 
-module.exports = mongoose.model('Supplier', SupplierSchema);
+// Índices para mejorar las búsquedas
+supplierSchema.index({ name: 1 });
+supplierSchema.index({ taxId: 1 }, { unique: true });
+supplierSchema.index({ isActive: 1 });
+
+const Supplier = mongoose.model('Supplier', supplierSchema);
+
+module.exports = Supplier;

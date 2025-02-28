@@ -5,12 +5,73 @@ const Customer = require('../models/Customer');
 // @access  Private
 exports.getCustomers = async (req, res) => {
   try {
-    const customers = await Customer.find().sort({ createdAt: -1 });
+    const { 
+      search = '', 
+      status,
+      minDebt,
+      maxDebt,
+      minCreditLimit,
+      maxCreditLimit,
+      sortBy = 'name', 
+      sortOrder = 'asc' 
+    } = req.query;
+
+    const filter = {};
+
+    if (search) {
+      filter.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { document: { $regex: search, $options: 'i' } },
+        { email: { $regex: search, $options: 'i' } },
+        { phone: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    if (status) {
+      filter.status = status;
+    }
+
+    // Filtros de deuda
+    if (minDebt || maxDebt) {
+      filter.currentDebt = {};
+      if (minDebt) filter.currentDebt.$gte = parseFloat(minDebt);
+      if (maxDebt) filter.currentDebt.$lte = parseFloat(maxDebt);
+    }
+
+    // Filtros de límite de crédito
+    if (minCreditLimit || maxCreditLimit) {
+      filter.creditLimit = {};
+      if (minCreditLimit) filter.creditLimit.$gte = parseFloat(minCreditLimit);
+      if (maxCreditLimit) filter.creditLimit.$lte = parseFloat(maxCreditLimit);
+    }
+
+    console.log('Filtros de búsqueda de clientes:', filter);
+
+    const sort = { [sortBy]: sortOrder === 'desc' ? -1 : 1 };
+
+    const customers = await Customer.find(filter)
+      .select('name document email phone address creditLimit currentDebt status paymentHistory')
+      .sort(sort);
+
+    console.log(`Clientes encontrados: ${customers.length}`);
+
     res.json({
       success: true,
-      data: customers
+      data: customers,
+      total: customers.length,
+      filters: {
+        search,
+        status,
+        minDebt,
+        maxDebt,
+        minCreditLimit,
+        maxCreditLimit,
+        sortBy,
+        sortOrder
+      }
     });
   } catch (error) {
+    console.error('Error al obtener clientes:', error);
     res.status(500).json({
       success: false,
       message: 'Error al obtener los clientes',
@@ -24,12 +85,28 @@ exports.getCustomers = async (req, res) => {
 // @access  Private
 exports.createCustomer = async (req, res) => {
   try {
-    const customer = await Customer.create(req.body);
+    console.log('Datos recibidos:', req.body);
+
+    const customer = new Customer({
+      name: req.body.name,
+      document: req.body.document,
+      email: req.body.email,
+      phone: req.body.phone,
+      address: req.body.address,
+      creditLimit: req.body.creditLimit || 0,
+      currentDebt: 0,
+      status: 'AL_DIA'
+    });
+
+    const savedCustomer = await customer.save();
+    console.log('Cliente creado:', savedCustomer);
+
     res.status(201).json({
       success: true,
-      data: customer
+      data: savedCustomer
     });
   } catch (error) {
+    console.error('Error al crear cliente:', error);
     res.status(400).json({
       success: false,
       message: 'Error al crear el cliente',
@@ -68,22 +145,40 @@ exports.getCustomerById = async (req, res) => {
 // @access  Private
 exports.updateCustomer = async (req, res) => {
   try {
+    console.log('Actualizando cliente:', req.params.id, req.body);
+
     const customer = await Customer.findByIdAndUpdate(
       req.params.id,
-      req.body,
+      {
+        name: req.body.name,
+        document: req.body.document,
+        email: req.body.email,
+        phone: req.body.phone,
+        address: req.body.address,
+        creditLimit: req.body.creditLimit
+      },
       { new: true, runValidators: true }
     );
+
     if (!customer) {
       return res.status(404).json({
         success: false,
         message: 'Cliente no encontrado'
       });
     }
+
+    // Actualizar estado basado en la deuda actual
+    customer.updateStatus();
+    await customer.save();
+
+    console.log('Cliente actualizado:', customer);
+
     res.json({
       success: true,
       data: customer
     });
   } catch (error) {
+    console.error('Error al actualizar cliente:', error);
     res.status(400).json({
       success: false,
       message: 'Error al actualizar el cliente',

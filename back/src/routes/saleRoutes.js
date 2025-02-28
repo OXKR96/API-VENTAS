@@ -13,14 +13,20 @@ const { protect, authorize } = require('../middlewares/authMiddleware');
 
 const router = express.Router();
 
-router.route('/')
-  .post(protect, authorize('admin', 'employee'), createSale)
-  .get(protect, authorize('admin', 'manager'), getSales);
+// Proteger todas las rutas
+router.use(protect);
 
-router.get('/stats', protect, getSalesStats);
-router.get('/date-range', protect, getSalesByDateRange);
-router.get('/:id', protect, getSaleById);
-router.put('/:id', protect, authorize('admin', 'manager'), updateSale);
-router.put('/:id/cancel', protect, authorize('admin', 'manager'), cancelSale);
+// Rutas públicas (para usuarios autenticados)
+router.route('/')
+  .get(getSales)
+  .post(createSale);
+
+router.get('/stats', getSalesStats);
+router.get('/date-range', getSalesByDateRange);
+router.get('/:id', getSaleById);
+
+// Rutas que requieren autorización
+router.put('/:id/cancel', authorize('admin', 'manager'), cancelSale);
+router.put('/:id', authorize('admin', 'manager'), updateSale);
 
 module.exports = router;

@@ -38,6 +38,12 @@ const SaleSchema = new mongoose.Schema({
     required: true,
     min: [0, 'El total no puede ser negativo']
   },
+  saleType: {
+    type: String,
+    enum: ['Contado', 'Crédito'],
+    default: 'Contado',
+    required: true
+  },
   paymentMethod: {
     type: String,
     enum: ['Efectivo', 'Tarjeta', 'Transferencia', 'Otro'],
@@ -49,10 +55,27 @@ const SaleSchema = new mongoose.Schema({
     default: 'Completada'
   },
   customer: {
-    name: String,
+    _id: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Customer',
+      required: function() {
+        return this.saleType === 'Crédito';
+      }
+    },
+    name: {
+      type: String,
+      required: function() {
+        return this.saleType === 'Crédito';
+      }
+    },
     email: String,
     phone: String,
-    document: String
+    document: {
+      type: String,
+      required: function() {
+        return this.saleType === 'Crédito';
+      }
+    }
   },
   notes: String,
   discount: {

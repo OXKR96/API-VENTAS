@@ -4,14 +4,33 @@ const mongoose = require('mongoose');
 // Crear nuevo producto
 exports.createProduct = async (req, res) => {
   try {
-    const product = new Product(req.body);
+    console.log('Datos recibidos:', req.body);
+
+    const product = new Product({
+      name: req.body.name,
+      description: req.body.description,
+      price: req.body.price,
+      costPrice: req.body.costPrice,
+      stock: req.body.stock,
+      category: req.body.category,
+      barcode: req.body.barcode,
+      imageUrl: req.body.imageUrl,
+      brand: req.body.brand,
+      supplier: req.body.supplier,
+      minimumStock: req.body.minimumStock,
+      taxes: req.body.taxes,
+      isActive: true
+    });
+
     const savedProduct = await product.save();
-    
+    console.log('Producto creado:', savedProduct);
+
     res.status(201).json({
       success: true,
       data: savedProduct
     });
   } catch (error) {
+    console.error('Error al crear producto:', error);
     res.status(400).json({
       success: false,
       message: error.message
@@ -23,23 +42,32 @@ exports.createProduct = async (req, res) => {
 exports.getAllProducts = async (req, res) => {
   try {
     const { 
-      page = 1, 
-      limit = 10, 
       search = '', 
       category,
       minPrice,
       maxPrice,
-      sortBy = 'createdAt',
-      sortOrder = 'desc'
+      minStock,
+      maxStock,
+      supplier,
+      brand,
+      sortBy = 'name',
+      sortOrder = 'asc',
+      isActive
     } = req.query;
 
-    // Construir filtro de búsqueda
     const filter = {};
+    
+    // Solo aplicar filtro de isActive si se proporciona
+    if (isActive !== undefined) {
+      filter.isActive = isActive === 'true';
+    }
     
     if (search) {
       filter.$or = [
         { name: { $regex: search, $options: 'i' } },
-        { description: { $regex: search, $options: 'i' } }
+        { description: { $regex: search, $options: 'i' } },
+        { barcode: { $regex: search, $options: 'i' } },
+        { brand: { $regex: search, $options: 'i' } }
       ];
     }
 
@@ -47,34 +75,45 @@ exports.getAllProducts = async (req, res) => {
       filter.category = category;
     }
 
+    if (supplier) {
+      filter.supplier = supplier;
+    }
+
+    if (brand) {
+      filter.brand = { $regex: brand, $options: 'i' };
+    }
+
+    // Filtros de precio
     if (minPrice || maxPrice) {
       filter.price = {};
       if (minPrice) filter.price.$gte = parseFloat(minPrice);
       if (maxPrice) filter.price.$lte = parseFloat(maxPrice);
     }
 
-    // Configurar ordenamiento
+    // Filtros de stock
+    if (minStock || maxStock) {
+      filter.stock = {};
+      if (minStock) filter.stock.$gte = parseInt(minStock);
+      if (maxStock) filter.stock.$lte = parseInt(maxStock);
+    }
+
+    console.log('Filtros de búsqueda de productos:', filter);
+
     const sort = { [sortBy]: sortOrder === 'desc' ? -1 : 1 };
 
-    // Realizar búsqueda paginada
     const products = await Product.find(filter)
-      .sort(sort)
-      .limit(limit * 1)
-      .skip((page - 1) * limit);
+      .populate('supplier', 'name')
+      .sort(sort);
 
-    // Contar total de productos
-    const total = await Product.countDocuments(filter);
+    console.log(`Productos encontrados: ${products.length}`);
 
     res.json({
       success: true,
       data: products,
-      pagination: {
-        currentPage: page,
-        totalPages: Math.ceil(total / limit),
-        totalProducts: total
-      }
+      total: products.length
     });
   } catch (error) {
+    console.error('Error al obtener productos:', error);
     res.status(500).json({
       success: false,
       message: error.message
@@ -109,13 +148,25 @@ exports.getProductById = async (req, res) => {
 // Actualizar producto
 exports.updateProduct = async (req, res) => {
   try {
+    console.log('Actualizando producto:', req.params.id, req.body);
+
     const product = await Product.findByIdAndUpdate(
-      req.params.id, 
-      req.body, 
-      { 
-        new: true, 
-        runValidators: true 
-      }
+      req.params.id,
+      {
+        name: req.body.name,
+        description: req.body.description,
+        price: req.body.price,
+        costPrice: req.body.costPrice,
+        stock: req.body.stock,
+        category: req.body.category,
+        barcode: req.body.barcode,
+        imageUrl: req.body.imageUrl,
+        brand: req.body.brand,
+        supplier: req.body.supplier,
+        minimumStock: req.body.minimumStock,
+        taxes: req.body.taxes
+      },
+      { new: true, runValidators: true }
     );
 
     if (!product) {
@@ -125,11 +176,14 @@ exports.updateProduct = async (req, res) => {
       });
     }
 
+    console.log('Producto actualizado:', product);
+
     res.json({
       success: true,
       data: product
     });
   } catch (error) {
+    console.error('Error al actualizar producto:', error);
     res.status(400).json({
       success: false,
       message: error.message

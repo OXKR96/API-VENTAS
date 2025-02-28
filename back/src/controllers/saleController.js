@@ -8,11 +8,19 @@ exports.createSale = async (req, res) => {
     const { 
       items, 
       paymentMethod, 
-      customer, 
+      customerId,
       notes, 
       discount = 0, 
-      taxes = 0 
+      taxes = 0,
+      saleType = 'Contado'
     } = req.body;
+
+    console.log('Datos recibidos:', {
+      saleType,
+      customerId,
+      paymentMethod,
+      items: items?.length
+    });
 
     // Validar y procesar items
     let totalAmount = 0;
@@ -58,13 +66,46 @@ exports.createSale = async (req, res) => {
     const taxAmount = totalAmount * taxRate;
     const total = totalAmount + taxAmount;
 
+    // Si es venta a crédito, buscar y validar el cliente
+    let customerData = null;
+    if (saleType === 'Crédito') {
+      if (!customerId) {
+        return res.status(400).json({
+          success: false,
+          message: 'Las ventas a crédito requieren un cliente'
+        });
+      }
+
+      // Buscar el cliente en la base de datos
+      const Customer = require('../models/Customer');
+      const customer = await Customer.findById(customerId);
+      
+      if (!customer) {
+        return res.status(400).json({
+          success: false,
+          message: 'Cliente no encontrado'
+        });
+      }
+
+      customerData = {
+        _id: customer._id,
+        name: customer.name,
+        email: customer.email,
+        phone: customer.phone,
+        document: customer.document
+      };
+    }
+
+    console.log('Datos del cliente procesados:', customerData);
+
     // Crear venta
     const sale = new Sale({
       user: req.user._id,
       items: processedItems,
       totalAmount,
+      saleType,
       paymentMethod,
-      customer,
+      customer: customerData,
       notes,
       discount,
       taxes,
@@ -83,11 +124,19 @@ exports.createSale = async (req, res) => {
     // Guardar venta
     await sale.save();
 
+    console.log('Venta creada:', {
+      saleType: sale.saleType,
+      customer: sale.customer,
+      totalAmount: sale.totalAmount,
+      invoiceNumber: sale.invoiceNumber
+    });
+
     res.status(201).json({
       success: true,
       data: sale
     });
   } catch (error) {
+    console.error('Error al crear venta:', error);
     res.status(400).json({
       success: false,
       message: error.message
@@ -99,38 +148,73 @@ exports.createSale = async (req, res) => {
 exports.getSales = async (req, res) => {
   try {
     const { 
-      page = 1, 
-      limit = 10, 
-      startDate, 
-      endDate 
+      search,
+      startDate,
+      endDate,
+      saleType,
+      status,
+      sort = '-createdAt'
     } = req.query;
 
-    const filter = {};
+    const query = {};
 
-    if (startDate && endDate) {
-      filter.saleDate = {
-        $gte: new Date(startDate),
-        $lte: new Date(endDate)
-      };
+    // Búsqueda por cliente o número de factura
+    if (search) {
+      query.$or = [
+        { 'customer.name': { $regex: search, $options: 'i' } },
+        { invoiceNumber: { $regex: search, $options: 'i' } }
+      ];
     }
 
-    const sales = await Sale.find(filter)
-      .sort({ saleDate: -1 })
-      .limit(limit * 1)
-      .skip((page - 1) * limit);
+    // Filtro por fechas
+    if (startDate || endDate) {
+      query.createdAt = {};
+      if (startDate) {
+        query.createdAt.$gte = new Date(startDate);
+      }
+      if (endDate) {
+        // Ajustar la fecha final al final del día
+        const endDateTime = new Date(endDate);
+        endDateTime.setHours(23, 59, 59, 999);
+        query.createdAt.$lte = endDateTime;
+      }
+    }
 
-    const total = await Sale.countDocuments(filter);
+    // Filtro por tipo de venta
+    if (saleType) {
+      query.saleType = saleType;
+    }
+
+    // Filtro por estado
+    if (status) {
+      query.status = status;
+    }
+
+    console.log('Query de filtrado:', query);
+
+    const sales = await Sale.find(query)
+      .sort(sort)
+      .populate('user', 'name')
+      .lean();
+
+    console.log(`Total de ventas encontradas: ${sales.length}`);
+
+    // Procesar las ventas para incluir el número de visualización
+    const processedSales = sales.map((sale, index) => ({
+      ...sale,
+      displayNumber: sales.length - index,
+      saleType: sale.saleType || 'Contado',
+      status: sale.status || 'Completada',
+      totalAmount: parseFloat(sale.totalAmount) || 0
+    }));
 
     res.json({
       success: true,
-      data: sales,
-      pagination: {
-        currentPage: page,
-        totalPages: Math.ceil(total / limit),
-        totalSales: total
-      }
+      count: processedSales.length,
+      data: processedSales
     });
   } catch (error) {
+    console.error('Error al obtener ventas:', error);
     res.status(500).json({
       success: false,
       message: error.message
@@ -206,8 +290,11 @@ exports.getSalesByDateRange = async (req, res) => {
 // Cancelar venta
 exports.cancelSale = async (req, res) => {
   try {
-    const sale = await Sale.findById(req.params.id);
+    const { id } = req.params;
+    console.log('Intentando cancelar venta:', id);
 
+    // Buscar la venta
+    const sale = await Sale.findById(id);
     if (!sale) {
       return res.status(404).json({
         success: false,
@@ -215,16 +302,29 @@ exports.cancelSale = async (req, res) => {
       });
     }
 
-    // Restaurar stock de productos
-    for (const item of sale.items) {
-      const product = await Product.findById(item.product);
-      product.stock += item.quantity;
-      await product.save();
+    // Verificar que la venta no esté ya cancelada
+    if (sale.status === 'Cancelada') {
+      return res.status(400).json({
+        success: false,
+        message: 'Esta venta ya está cancelada'
+      });
     }
 
-    // Actualizar estado de la venta
+    // Revertir el stock de los productos
+    for (const item of sale.items) {
+      const product = await Product.findById(item.product);
+      if (product) {
+        console.log(`Revirtiendo stock del producto ${product.name} en ${item.quantity} unidades`);
+        product.stock += item.quantity; // Devolver la cantidad al inventario
+        await product.save();
+      }
+    }
+
+    // Actualizar el estado de la venta a cancelada
     sale.status = 'Cancelada';
     await sale.save();
+
+    console.log('Venta cancelada exitosamente:', sale);
 
     res.json({
       success: true,
@@ -232,9 +332,10 @@ exports.cancelSale = async (req, res) => {
       data: sale
     });
   } catch (error) {
+    console.error('Error al cancelar la venta:', error);
     res.status(500).json({
       success: false,
-      message: error.message
+      message: 'Error al cancelar la venta: ' + error.message
     });
   }
 };

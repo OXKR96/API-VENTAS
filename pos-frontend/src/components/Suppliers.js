@@ -1,309 +1,341 @@
-import React, { useState, useEffect } from 'react';
-import { api } from '../services/api';
+import React, { useState, useEffect, useCallback } from 'react';
+import { Table, Button, Container, Row, Col, Form, Badge, Modal } from 'react-bootstrap';
 import { toast } from 'react-toastify';
+import { api } from '../services/api';
 
-function Suppliers() {
+const Suppliers = () => {
   const [suppliers, setSuppliers] = useState([]);
-  const [currentSupplier, setCurrentSupplier] = useState({
+  const [showModal, setShowModal] = useState(false);
+  const [currentSupplier, setCurrentSupplier] = useState(null);
+  const [search, setSearch] = useState('');
+  const [showInactive, setShowInactive] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+
+  const paymentTermsOptions = [
+    { value: 'Contado', label: 'Contado' },
+    { value: '7 días', label: '7 días' },
+    { value: '15 días', label: '15 días' },
+    { value: '21 días', label: '21 días' },
+    { value: '30 días', label: '30 días' },
+    { value: '45 días', label: '45 días' },
+    { value: '60 días', label: '60 días' },
+    { value: '90 días', label: '90 días' },
+    { value: 'Fin de mes', label: 'Fin de mes' },
+    { value: 'Contra entrega', label: 'Contra entrega' },
+    { value: 'Pago anticipado', label: 'Pago anticipado' }
+  ];
+
+  const initialFormData = {
     name: '',
     contactName: '',
     email: '',
     phone: '',
     address: '',
     taxId: '',
-    paymentTerms: 'Contado',
-    isActive: true
-  });
-  const [showModal, setShowModal] = useState(false);
-  const [error, setError] = useState('');
+    paymentTerms: 'Contado' // Valor por defecto
+  };
 
-  const paymentTermsOptions = [
-    'Contado',
-    '15 días',
-    '30 días',
-    '60 días'
-  ];
+  const [formData, setFormData] = useState(initialFormData);
+
+  // Debounce para la búsqueda
+  const debounce = (func, wait) => {
+    let timeout;
+    return (...args) => {
+      clearTimeout(timeout);
+      timeout = setTimeout(() => func(...args), wait);
+    };
+  };
+
+  const loadSuppliers = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      const response = await api.get(`/suppliers?search=${search}&isActive=${!showInactive}`);
+      if (response.data.success) {
+        setSuppliers(response.data.data);
+      }
+    } catch (error) {
+      console.error('Error al cargar proveedores:', error);
+      toast.error('Error al cargar los proveedores');
+    } finally {
+      setIsLoading(false);
+    }
+  }, [search, showInactive]);
 
   useEffect(() => {
-    loadSuppliers();
-  }, []);
+    const debouncedLoad = debounce(() => {
+      loadSuppliers();
+    }, 300);
+    debouncedLoad();
+    return () => debouncedLoad.cancel?.();
+  }, [loadSuppliers]);
 
-  const loadSuppliers = async () => {
-    try {
-      const response = await api.getSuppliers();
-      setSuppliers(response.data);
-    } catch (error) {
-      setError('Error al cargar proveedores');
-    }
+  const handleInputChange = (e) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({
+      ...prev,
+      [name]: value
+    }));
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
-      if (currentSupplier._id) {
-        await api.updateSupplier(currentSupplier._id, currentSupplier);
+      setIsLoading(true);
+      if (currentSupplier) {
+        await api.put(`/suppliers/${currentSupplier._id}`, formData);
         toast.success('Proveedor actualizado exitosamente');
       } else {
-        await api.createSupplier(currentSupplier);
+        await api.post('/suppliers', formData);
         toast.success('Proveedor creado exitosamente');
       }
       setShowModal(false);
+      setFormData(initialFormData);
       loadSuppliers();
-      resetForm();
     } catch (error) {
+      console.error('Error:', error);
       toast.error(error.response?.data?.message || 'Error al procesar la operación');
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  const toggleActive = async (supplier) => {
-    try {
-      const updatedSupplier = {
-        ...supplier,
-        isActive: !supplier.isActive
-      };
-      await api.updateSupplier(supplier._id, updatedSupplier);
-      loadSuppliers();
-    } catch (error) {
-      setError('Error al actualizar el estado del proveedor');
-    }
-  };
-
-  const resetForm = () => {
-    setCurrentSupplier({
-      name: '',
-      contactName: '',
-      email: '',
-      phone: '',
-      address: '',
-      taxId: '',
-      paymentTerms: 'Contado',
-      isActive: true
+  const handleEdit = (supplier) => {
+    setCurrentSupplier(supplier);
+    setFormData({
+      name: supplier.name,
+      contactName: supplier.contactName,
+      email: supplier.email,
+      phone: supplier.phone,
+      address: supplier.address,
+      taxId: supplier.taxId,
+      paymentTerms: supplier.paymentTerms
     });
-    setError('');
+    setShowModal(true);
   };
 
-  const handleDelete = async (id) => {
-    if (window.confirm('¿Está seguro de eliminar este proveedor?')) {
-      try {
-        await api.deleteSupplier(id);
-        toast.success('Proveedor eliminado exitosamente');
+  const handleToggleStatus = async (supplier) => {
+    try {
+      setIsLoading(true);
+      const newStatus = !supplier.isActive;
+      const response = await api.put(`/suppliers/${supplier._id}/toggle-status`, {
+        isActive: newStatus
+      });
+      
+      if (response.data.success) {
+        toast.success(response.data.message);
         loadSuppliers();
-      } catch (error) {
-        toast.error(error.response?.data?.message || 'Error al eliminar el proveedor');
       }
+    } catch (error) {
+      console.error('Error:', error);
+      toast.error('Error al cambiar el estado del proveedor');
+    } finally {
+      setIsLoading(false);
     }
   };
 
   return (
-    <div className="container mt-4">
-      <div className="d-flex justify-content-between mb-4">
-        <h2>Proveedores</h2>
-        <button 
-          className="btn btn-primary" 
-          onClick={() => {
-            resetForm();
-            setShowModal(true);
-          }}
-        >
-          Nuevo Proveedor
-        </button>
-      </div>
+    <Container fluid>
+      <Row className="mb-3">
+        <Col>
+          <h2>Proveedores</h2>
+        </Col>
+        <Col xs="auto">
+          <Button 
+            variant="primary" 
+            onClick={() => {
+              setCurrentSupplier(null);
+              setFormData(initialFormData);
+              setShowModal(true);
+            }}
+            disabled={isLoading}
+          >
+            Nuevo Proveedor
+          </Button>
+        </Col>
+      </Row>
 
-      {error && <div className="alert alert-danger">{error}</div>}
+      <Row className="mb-3">
+        <Col md={4}>
+          <Form.Control
+            type="text"
+            placeholder="Buscar por nombre..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            disabled={isLoading}
+          />
+        </Col>
+        <Col md={4}>
+          <Form.Check
+            type="switch"
+            id="show-inactive"
+            label="Mostrar proveedores inactivos"
+            checked={showInactive}
+            onChange={(e) => setShowInactive(e.target.checked)}
+            disabled={isLoading}
+          />
+        </Col>
+      </Row>
 
-      <div className="table-responsive">
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Nombre</th>
-              <th>Contacto</th>
-              <th>Email</th>
-              <th>Teléfono</th>
-              <th>Términos de Pago</th>
-              <th>Estado</th>
-              <th>Acciones</th>
+      <Table striped bordered hover responsive>
+        <thead>
+          <tr>
+            <th>Nombre</th>
+            <th>Contacto</th>
+            <th>Email</th>
+            <th>Teléfono</th>
+            <th>CC/NIT</th>
+            <th>Estado</th>
+            <th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          {suppliers.map((supplier) => (
+            <tr key={supplier._id}>
+              <td>{supplier.name}</td>
+              <td>{supplier.contactName}</td>
+              <td>{supplier.email}</td>
+              <td>{supplier.phone}</td>
+              <td>{supplier.taxId}</td>
+              <td>
+                <Badge bg={supplier.isActive ? 'success' : 'danger'}>
+                  {supplier.isActive ? 'Activo' : 'Inactivo'}
+                </Badge>
+              </td>
+              <td>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  className="me-2"
+                  onClick={() => handleEdit(supplier)}
+                  disabled={isLoading}
+                >
+                  Editar
+                </Button>
+                <Button
+                  variant={supplier.isActive ? "danger" : "success"}
+                  size="sm"
+                  onClick={() => handleToggleStatus(supplier)}
+                  disabled={isLoading}
+                >
+                  {supplier.isActive ? 'Desactivar' : 'Activar'}
+                </Button>
+              </td>
             </tr>
-          </thead>
-          <tbody>
-            {suppliers.map(supplier => (
-              <tr key={supplier._id} className={!supplier.isActive ? 'table-secondary' : ''}>
-                <td>{supplier.name}</td>
-                <td>{supplier.contactName}</td>
-                <td>{supplier.email}</td>
-                <td>{supplier.phone}</td>
-                <td>{supplier.paymentTerms}</td>
-                <td>
-                  <span className={`badge ${supplier.isActive ? 'bg-success' : 'bg-danger'}`}>
-                    {supplier.isActive ? 'Activo' : 'Inactivo'}
-                  </span>
-                </td>
-                <td>
-                  <button 
-                    className="btn btn-sm btn-primary me-2"
-                    onClick={() => {
-                      setCurrentSupplier(supplier);
-                      setShowModal(true);
-                    }}
+          ))}
+        </tbody>
+      </Table>
+
+      <Modal show={showModal} onHide={() => setShowModal(false)} size="lg">
+        <Modal.Header closeButton>
+          <Modal.Title>{currentSupplier ? 'Editar Proveedor' : 'Nuevo Proveedor'}</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          <Form onSubmit={handleSubmit}>
+            <Row>
+              <Col md={6}>
+                <Form.Group className="mb-3">
+                  <Form.Label>Nombre</Form.Label>
+                  <Form.Control
+                    type="text"
+                    name="name"
+                    value={formData.name}
+                    onChange={handleInputChange}
+                    required
+                  />
+                </Form.Group>
+              </Col>
+              <Col md={6}>
+                <Form.Group className="mb-3">
+                  <Form.Label>CC/NIT</Form.Label>
+                  <Form.Control
+                    type="text"
+                    name="taxId"
+                    value={formData.taxId}
+                    onChange={handleInputChange}
+                    required
+                  />
+                </Form.Group>
+              </Col>
+            </Row>
+
+            <Row>
+              <Col md={6}>
+                <Form.Group className="mb-3">
+                  <Form.Label>Nombre de Contacto</Form.Label>
+                  <Form.Control
+                    type="text"
+                    name="contactName"
+                    value={formData.contactName}
+                    onChange={handleInputChange}
+                  />
+                </Form.Group>
+              </Col>
+              <Col md={6}>
+                <Form.Group className="mb-3">
+                  <Form.Label>Email</Form.Label>
+                  <Form.Control
+                    type="email"
+                    name="email"
+                    value={formData.email}
+                    onChange={handleInputChange}
+                  />
+                </Form.Group>
+              </Col>
+            </Row>
+
+            <Row>
+              <Col md={6}>
+                <Form.Group className="mb-3">
+                  <Form.Label>Teléfono</Form.Label>
+                  <Form.Control
+                    type="text"
+                    name="phone"
+                    value={formData.phone}
+                    onChange={handleInputChange}
+                  />
+                </Form.Group>
+              </Col>
+              <Col md={6}>
+                <Form.Group className="mb-3">
+                  <Form.Label>Términos de Pago</Form.Label>
+                  <Form.Select
+                    name="paymentTerms"
+                    value={formData.paymentTerms}
+                    onChange={handleInputChange}
+                    required
                   >
-                    Editar
-                  </button>
-                  <button 
-                    className={`btn btn-sm ${supplier.isActive ? 'btn-danger' : 'btn-success'}`}
-                    onClick={() => toggleActive(supplier)}
-                  >
-                    {supplier.isActive ? 'Desactivar' : 'Activar'}
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+                    {paymentTermsOptions.map(option => (
+                      <option key={option.value} value={option.value}>
+                        {option.label}
+                      </option>
+                    ))}
+                  </Form.Select>
+                </Form.Group>
+              </Col>
+            </Row>
 
-      {showModal && (
-        <div className="modal show d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
-          <div className="modal-dialog">
-            <div className="modal-content">
-              <div className="modal-header">
-                <h5 className="modal-title">
-                  {currentSupplier._id ? 'Editar Proveedor' : 'Nuevo Proveedor'}
-                </h5>
-                <button 
-                  type="button" 
-                  className="btn-close" 
-                  onClick={() => {
-                    setShowModal(false);
-                    resetForm();
-                  }}
-                ></button>
-              </div>
-              <div className="modal-body">
-                <form onSubmit={handleSubmit}>
-                  <div className="mb-3">
-                    <label className="form-label">Nombre *</label>
-                    <input
-                      type="text"
-                      className="form-control"
-                      value={currentSupplier.name}
-                      onChange={(e) => setCurrentSupplier({
-                        ...currentSupplier,
-                        name: e.target.value
-                      })}
-                      required
-                    />
-                  </div>
-
-                  <div className="mb-3">
-                    <label className="form-label">Nombre de Contacto</label>
-                    <input
-                      type="text"
-                      className="form-control"
-                      value={currentSupplier.contactName || ''}
-                      onChange={(e) => setCurrentSupplier({
-                        ...currentSupplier,
-                        contactName: e.target.value
-                      })}
-                    />
-                  </div>
-
-                  <div className="mb-3">
-                    <label className="form-label">Email</label>
-                    <input
-                      type="email"
-                      className="form-control"
-                      value={currentSupplier.email || ''}
-                      onChange={(e) => setCurrentSupplier({
-                        ...currentSupplier,
-                        email: e.target.value
-                      })}
-                    />
-                  </div>
-
-                  <div className="mb-3">
-                    <label className="form-label">Teléfono</label>
-                    <input
-                      type="text"
-                      className="form-control"
-                      value={currentSupplier.phone || ''}
-                      onChange={(e) => setCurrentSupplier({
-                        ...currentSupplier,
-                        phone: e.target.value
-                      })}
-                    />
-                  </div>
-
-                  <div className="mb-3">
-                    <label className="form-label">Dirección</label>
-                    <textarea
-                      className="form-control"
-                      value={currentSupplier.address || ''}
-                      onChange={(e) => setCurrentSupplier({
-                        ...currentSupplier,
-                        address: e.target.value
-                      })}
-                    />
-                  </div>
-
-                  <div className="mb-3">
-                    <label className="form-label">NIT/RUT</label>
-                    <input
-                      type="text"
-                      className="form-control"
-                      value={currentSupplier.taxId || ''}
-                      onChange={(e) => setCurrentSupplier({
-                        ...currentSupplier,
-                        taxId: e.target.value
-                      })}
-                    />
-                  </div>
-
-                  <div className="mb-3">
-                    <label className="form-label">Términos de Pago</label>
-                    <select
-                      className="form-select"
-                      value={currentSupplier.paymentTerms}
-                      onChange={(e) => setCurrentSupplier({
-                        ...currentSupplier,
-                        paymentTerms: e.target.value
-                      })}
-                    >
-                      {paymentTermsOptions.map(term => (
-                        <option key={term} value={term}>{term}</option>
-                      ))}
-                    </select>
-                  </div>
-
-                  {currentSupplier._id && (
-                    <div className="mb-3">
-                      <div className="form-check">
-                        <input
-                          type="checkbox"
-                          className="form-check-input"
-                          id="isActive"
-                          checked={currentSupplier.isActive}
-                          onChange={(e) => setCurrentSupplier({
-                            ...currentSupplier,
-                            isActive: e.target.checked
-                          })}
-                        />
-                        <label className="form-check-label" htmlFor="isActive">
-                          Proveedor Activo
-                        </label>
-                      </div>
-                    </div>
-                  )}
-
-                  <button type="submit" className="btn btn-primary w-100">
-                    {currentSupplier._id ? 'Actualizar' : 'Crear'}
-                  </button>
-                </form>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
+            <Form.Group className="mb-3">
+              <Form.Label>Dirección</Form.Label>
+              <Form.Control
+                type="text"
+                name="address"
+                value={formData.address}
+                onChange={handleInputChange}
+              />
+            </Form.Group>
+          </Form>
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="secondary" onClick={() => setShowModal(false)} disabled={isLoading}>
+            Cancelar
+          </Button>
+          <Button variant="primary" onClick={handleSubmit} disabled={isLoading}>
+            {isLoading ? 'Guardando...' : 'Guardar'}
+          </Button>
+        </Modal.Footer>
+      </Modal>
+    </Container>
   );
-}
+};
 
 export default Suppliers;

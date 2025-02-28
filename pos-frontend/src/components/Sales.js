@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../services/api';
 import { toast } from 'react-toastify';
+import { Badge, Button, Table } from 'react-bootstrap';
 
 export function Sales() {
   const [products, setProducts] = useState([]);
@@ -13,8 +14,28 @@ export function Sales() {
   const [sales, setSales] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [selectedCustomer, setSelectedCustomer] = useState(null);
+  const [saleType, setSaleType] = useState('Contado');
   const [paymentMethod, setPaymentMethod] = useState('Efectivo');
   const [editingSale, setEditingSale] = useState(null);
+  const [saleData, setSaleData] = useState({
+    paymentMethod: 'Efectivo',
+    saleType: 'Contado',
+    notes: '',
+    items: []
+  });
+  const [filters, setFilters] = useState({
+    search: '',
+    dateRange: {
+      start: '',
+      end: ''
+    },
+    saleType: '',
+    status: ''
+  });
+  const [showDetailModal, setShowDetailModal] = useState(false);
+  const [selectedSale, setSelectedSale] = useState(null);
+  const [allSales, setAllSales] = useState([]); // Estado para todas las ventas sin filtrar
+  const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
     loadProducts();
@@ -53,14 +74,74 @@ export function Sales() {
     }
   };
 
+  // Efecto para cargar ventas cuando cambien los filtros
+  useEffect(() => {
+    loadSales();
+  }, [filters]);
+
   const loadSales = async () => {
     try {
-      const response = await api.getSales();
-      setSales(response.data);
+      const response = await api.getSales(filters);
+      console.log('Respuesta completa de ventas:', response);
+      
+      if (!response.success) {
+        console.error('Error en la respuesta del API');
+        return;
+      }
+      
+      let salesArray = response.data || [];
+      console.log('Número total de ventas recibidas:', salesArray.length);
+      
+      // Procesar las ventas
+      const processedSales = salesArray.map((sale, index) => ({
+        ...sale,
+        displayNumber: salesArray.length - index,
+        saleType: sale.saleType || 'Contado',
+        status: sale.status || 'Completada',
+        totalAmount: parseFloat(sale.totalAmount) || 0,
+        items: Array.isArray(sale.items) ? sale.items : [],
+        createdAt: sale.createdAt || sale.date || new Date().toISOString()
+      }));
+      
+      console.log('Ventas procesadas:', processedSales.length);
+      
+      setAllSales(processedSales);
+      setSales(processedSales);
+      
+      if (processedSales.length === 0) {
+        toast.info('No se encontraron ventas con los filtros aplicados');
+      }
+      
     } catch (error) {
       console.error('Error al cargar ventas:', error);
-      setError('Error al cargar el historial de ventas');
+      toast.error('Error al cargar el historial de ventas');
     }
+  };
+
+  const handleFilterChange = (field, value) => {
+    setFilters(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
+
+  const handleDateRangeChange = (field, value) => {
+    setFilters(prev => ({
+      ...prev,
+      dateRange: {
+        ...prev.dateRange,
+        [field]: value
+      }
+    }));
+  };
+
+  const handleClearFilters = () => {
+    setFilters({
+      search: '',
+      dateRange: { start: '', end: '' },
+      saleType: '',
+      status: ''
+    });
   };
 
   const handleAddToCart = (product) => {
@@ -107,78 +188,111 @@ export function Sales() {
   };
 
   const handleCancelSale = async (saleId) => {
-    if (!window.confirm('¿Está seguro de cancelar esta venta?\n\nRecuerde que:\n- El stock de los productos será devuelto al inventario\n- Esta operación no se puede deshacer')) {
-      return;
-    }
-
     try {
-      const response = await api.cancelSale(saleId);
-      if (response.success) {
-        toast.success(response.message || 'Venta cancelada exitosamente');
-        loadProducts(); // Recargamos los productos para actualizar el stock
-        loadSales(); // Recargamos las ventas
+      if (!window.confirm('¿Está seguro de que desea cancelar esta venta? Esta acción revertirá el stock de los productos.')) {
+        return;
+      }
+
+      setIsLoading(true);
+      const response = await api.put(`/sales/${saleId}/cancel`);
+      
+      if (response.data.success) {
+        toast.success('Venta cancelada exitosamente');
+        loadSales(); // Recargar la lista de ventas
       } else {
-        toast.error(response.message || 'Error al cancelar la venta');
+        toast.error(response.data.message || 'Error al cancelar la venta');
       }
     } catch (error) {
       console.error('Error al cancelar la venta:', error);
       toast.error(error.response?.data?.message || 'Error al cancelar la venta');
+    } finally {
+      setIsLoading(false);
     }
   };
 
-  const handleCreateSale = async () => {
+  const handleSaleTypeChange = (type) => {
+    if (type === 'Crédito' && !selectedCustomer) {
+      toast.error('Debe seleccionar un cliente para ventas a crédito');
+      return;
+    }
+    setSaleType(type);
+  };
+
+  const handlePaymentMethodChange = (method) => {
+    setPaymentMethod(method);
+  };
+
+  const handleCompleteSale = async () => {
     try {
-      if (!selectedCustomer) {
-        setError('Por favor seleccione un cliente');
+      if (!cart.length) {
+        toast.error('Agregue al menos un producto a la venta');
         return;
       }
 
-      // Verificar stock antes de crear la venta
-      for (const item of cart) {
-        const product = products.find(p => p._id === item._id);
-        if (!product || product.stock < item.quantity) {
-          setError(`Stock insuficiente para ${item.name}`);
-          return;
-        }
+      if (saleType === 'Crédito' && !selectedCustomer) {
+        toast.error('Debe seleccionar un cliente para ventas a crédito');
+        return;
       }
 
-      const sale = {
+      const totalAmount = cart.reduce((sum, item) => sum + (item.quantity * item.price), 0);
+
+      const salePayload = {
         items: cart.map(item => ({
           product: item._id,
           quantity: item.quantity,
           price: item.price,
           name: item.name,
-          subtotal: item.price * item.quantity
+          subtotal: item.quantity * item.price
         })),
-        paymentMethod,
-        customer: selectedCustomer,
-        totalAmount: cart.reduce((sum, item) => sum + (item.price * item.quantity), 0),
+        totalAmount: totalAmount,
+        saleType: saleType,
+        paymentMethod: paymentMethod,
+        customerId: selectedCustomer?._id || null,
+        date: new Date().toISOString(),
         status: 'Completada',
-        notes: '',
-        discount: 0,
-        taxes: 19
+        notes: saleData.notes
       };
+
+      console.log('Enviando venta:', salePayload);
+      const response = await api.createSale(salePayload);
       
-      if (editingSale) {
-        await api.updateSale(editingSale._id, sale);
-        toast.success('Venta actualizada exitosamente');
-      } else {
-        await api.createSale(sale);
+      if (response.success) {
         toast.success('Venta registrada exitosamente');
+        resetSale();
+        loadProducts();
+        loadSales();
+      } else {
+        toast.error(response.message || 'Error al procesar la venta');
       }
-      
-      setCart([]);
-      setShowModal(false);
-      setError('');
-      setSelectedCustomer(null);
-      setPaymentMethod('Efectivo');
-      setEditingSale(null);
-      loadProducts();
-      loadSales();
     } catch (error) {
-      console.error('Error detallado:', error.response?.data || error);
-      setError('Error al procesar la venta: ' + (error.response?.data?.message || error.message));
+      console.error('Error al completar la venta:', error);
+      toast.error(error.response?.data?.message || 'Error al procesar la venta');
     }
+  };
+
+  const calculateTotal = () => {
+    return cart.reduce((sum, item) => sum + (item.quantity * item.price), 0);
+  };
+
+  const handleCustomerSelect = (customerId) => {
+    const customer = customers.find(c => c._id === customerId);
+    setSelectedCustomer(customer || null);
+  };
+
+  const resetSale = () => {
+    setCart([]);
+    setShowModal(false);
+    setError('');
+    setSelectedCustomer(null);
+    setSaleType('Contado');
+    setPaymentMethod('Efectivo');
+    setEditingSale(null);
+    setSaleData({
+      paymentMethod: 'Efectivo',
+      saleType: 'Contado',
+      notes: '',
+      items: []
+    });
   };
 
   // Función para formatear la fecha
@@ -193,8 +307,13 @@ export function Sales() {
     return new Date(dateString).toLocaleDateString('es-ES', options);
   };
 
+  const handleViewSaleDetail = (sale) => {
+    setSelectedSale(sale);
+    setShowDetailModal(true);
+  };
+
   return (
-    <div className="container mt-4">
+    <div className="container-fluid mt-4">
       {error && (
         <div className="alert alert-danger" role="alert">
           {error}
@@ -202,67 +321,152 @@ export function Sales() {
       )}
       <div className="d-flex justify-content-between mb-4">
         <h2>Ventas</h2>
-        <button className="btn btn-primary" onClick={() => setShowModal(true)}>
-          Nueva Venta
-        </button>
+        <div className="d-flex gap-2">
+          <button className="btn btn-primary" onClick={() => setShowModal(true)}>
+            Nueva Venta
+          </button>
+        </div>
       </div>
 
-      {/* Tabla de historial de ventas */}
-      <div className="table-responsive">
-        <table className="table table-striped">
-          <thead>
-            <tr>
-              <th>Fecha</th>
-              <th>Cliente</th>
-              <th>Productos</th>
-              <th>Total</th>
-              <th>Método de Pago</th>
-              <th>Estado</th>
-              <th>Acciones</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sales.map((sale) => (
-              <tr key={sale._id}>
-                <td>{formatDate(sale.createdAt)}</td>
-                <td>{sale.customer?.name || 'Cliente General'}</td>
-                <td>
-                  <ul className="list-unstyled mb-0">
-                    {sale.items.map((item, index) => (
-                      <li key={index}>
-                        {item.quantity}x {item.name} - ${item.price}
-                      </li>
-                    ))}
-                  </ul>
-                </td>
-                <td>${sale.totalAmount}</td>
-                <td>{sale.paymentMethod}</td>
-                <td>
-                  <span className={`badge ${sale.status === 'Completada' ? 'bg-success' : 'bg-warning'}`}>
-                    {sale.status}
-                  </span>
-                </td>
-                <td>
-                  <div className="btn-group" role="group">
-                    <button
-                      className="btn btn-outline-danger btn-sm"
-                      onClick={() => handleCancelSale(sale._id)}
-                      title="Cancelar venta"
-                      disabled={sale.status !== 'Completada'}
-                    >
-                      <i className="fas fa-ban"></i>
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {sales.length === 0 && (
-          <div className="text-center p-3">
-            <p>No hay ventas registradas</p>
+      {/* Filtros de ventas */}
+      <div className="card mb-4">
+        <div className="card-body">
+          <div className="row g-3">
+            <div className="col-md-3">
+              <label className="form-label">Buscar</label>
+              <input
+                type="text"
+                className="form-control"
+                placeholder="Buscar por cliente o número..."
+                value={filters.search}
+                onChange={(e) => handleFilterChange('search', e.target.value)}
+              />
+            </div>
+            <div className="col-md-2">
+              <label className="form-label">Fecha Inicio</label>
+              <input
+                type="date"
+                className="form-control"
+                value={filters.dateRange.start}
+                onChange={(e) => handleDateRangeChange('start', e.target.value)}
+              />
+            </div>
+            <div className="col-md-2">
+              <label className="form-label">Fecha Fin</label>
+              <input
+                type="date"
+                className="form-control"
+                value={filters.dateRange.end}
+                onChange={(e) => handleDateRangeChange('end', e.target.value)}
+              />
+            </div>
+            <div className="col-md-2">
+              <label className="form-label">Tipo de Venta</label>
+              <select
+                className="form-select"
+                value={filters.saleType}
+                onChange={(e) => handleFilterChange('saleType', e.target.value)}
+              >
+                <option value="">Todos</option>
+                <option value="Contado">Contado</option>
+                <option value="Crédito">Crédito</option>
+              </select>
+            </div>
+            <div className="col-md-2">
+              <label className="form-label">Estado</label>
+              <select
+                className="form-select"
+                value={filters.status}
+                onChange={(e) => handleFilterChange('status', e.target.value)}
+              >
+                <option value="">Todos</option>
+                <option value="Completada">Completada</option>
+                <option value="Cancelada">Cancelada</option>
+              </select>
+            </div>
+            <div className="col-md-1 d-flex align-items-end">
+              <button
+                className="btn btn-outline-secondary w-100"
+                onClick={handleClearFilters}
+              >
+                Limpiar
+              </button>
+            </div>
           </div>
-        )}
+        </div>
+      </div>
+
+      {/* Tabla de ventas */}
+      <div className="card">
+        <div className="card-body p-0">
+          <div className="table-responsive" style={{ maxHeight: '70vh', overflowY: 'auto' }}>
+            <Table striped bordered hover responsive>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Cliente</th>
+                  <th>Tipo</th>
+                  <th>Método de Pago</th>
+                  <th>Fecha</th>
+                  <th>Total</th>
+                  <th>Estado</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sales.map((sale) => (
+                  <tr key={sale._id}>
+                    <td>{sale.displayNumber}</td>
+                    <td>{sale.customer?.name || 'Cliente General'}</td>
+                    <td>
+                      <Badge bg={sale.saleType === 'Crédito' ? 'info' : 'success'}>
+                        {sale.saleType}
+                      </Badge>
+                    </td>
+                    <td>{sale.paymentMethod}</td>
+                    <td>{formatDate(sale.createdAt)}</td>
+                    <td>${sale.totalAmount.toLocaleString()}</td>
+                    <td>
+                      <Badge bg={sale.status === 'Completada' ? 'success' : 
+                               sale.status === 'Cancelada' ? 'danger' : 'warning'}>
+                        {sale.status}
+                      </Badge>
+                    </td>
+                    <td>
+                      <div className="btn-group">
+                        <Button
+                          variant="outline-primary"
+                          size="sm"
+                          onClick={() => handleViewSaleDetail(sale)}
+                          title="Ver detalles"
+                        >
+                          <i className="fas fa-eye"></i>
+                        </Button>
+                        {sale.status !== 'Cancelada' && (
+                          <Button
+                            variant="outline-danger"
+                            size="sm"
+                            className="ms-1"
+                            onClick={() => handleCancelSale(sale._id)}
+                            disabled={isLoading}
+                            title="Cancelar venta"
+                          >
+                            <i className="fas fa-ban"></i>
+                          </Button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </Table>
+            {sales.length === 0 && (
+              <div className="text-center p-3">
+                <p>No hay ventas que coincidan con los filtros</p>
+              </div>
+            )}
+          </div>
+        </div>
       </div>
 
       {showModal && (
@@ -282,6 +486,7 @@ export function Sales() {
                     setPaymentMethod('Efectivo');
                     setEditingSale(null);
                     setCart([]);
+                    resetSale();
                   }}
                 ></button>
               </div>
@@ -292,11 +497,8 @@ export function Sales() {
                   <select
                     className="form-select"
                     value={selectedCustomer?._id || ''}
-                    onChange={(e) => {
-                      const customer = customers.find(c => c._id === e.target.value);
-                      setSelectedCustomer(customer || null);
-                    }}
-                    required
+                    onChange={(e) => handleCustomerSelect(e.target.value)}
+                    required={saleType === 'Crédito'}
                   >
                     <option value="">Seleccionar cliente...</option>
                     {customers.map(customer => (
@@ -307,19 +509,52 @@ export function Sales() {
                   </select>
                 </div>
 
-                {/* Método de pago */}
+                {/* Tipo de Venta */}
+                <div className="mb-3">
+                  <label className="form-label">Tipo de Venta</label>
+                  <div className="d-flex gap-2">
+                    <button
+                      type="button"
+                      className={`btn ${saleType === 'Contado' ? 'btn-primary' : 'btn-outline-primary'}`}
+                      onClick={() => handleSaleTypeChange('Contado')}
+                    >
+                      Contado
+                    </button>
+                    <button
+                      type="button"
+                      className={`btn ${saleType === 'Crédito' ? 'btn-primary' : 'btn-outline-primary'}`}
+                      onClick={() => handleSaleTypeChange('Crédito')}
+                    >
+                      Crédito
+                    </button>
+                  </div>
+                </div>
+
+                {/* Método de Pago */}
                 <div className="mb-3">
                   <label className="form-label">Método de Pago</label>
                   <select
                     className="form-select"
                     value={paymentMethod}
-                    onChange={(e) => setPaymentMethod(e.target.value)}
+                    onChange={(e) => handlePaymentMethodChange(e.target.value)}
+                    disabled={saleType === 'Crédito'}
                   >
                     <option value="Efectivo">Efectivo</option>
                     <option value="Tarjeta">Tarjeta</option>
-                    <option value="Crédito">Crédito</option>
                     <option value="Transferencia">Transferencia</option>
                   </select>
+                </div>
+
+                {/* Observaciones */}
+                <div className="mb-3">
+                  <label className="form-label">Observaciones</label>
+                  <textarea
+                    className="form-control"
+                    value={saleData.notes}
+                    onChange={(e) => setSaleData({ ...saleData, notes: e.target.value })}
+                    rows="3"
+                    placeholder="Agregar observaciones sobre la venta..."
+                  ></textarea>
                 </div>
 
                 {/* Selector de productos */}
@@ -450,7 +685,7 @@ export function Sales() {
                       <td colSpan="4" className="text-end"><strong>Total:</strong></td>
                       <td colSpan="2">
                         <strong>
-                          ${cart.reduce((sum, item) => sum + (item.price * item.quantity), 0)}
+                          ${calculateTotal()}
                         </strong>
                       </td>
                     </tr>
@@ -459,10 +694,88 @@ export function Sales() {
 
                 <button 
                   className="btn btn-primary w-100"
-                  onClick={handleCreateSale}
+                  onClick={handleCompleteSale}
                   disabled={cart.length === 0 || !selectedCustomer}
                 >
                   {editingSale ? 'Actualizar Venta' : 'Completar Venta'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Detalles de Venta */}
+      {showDetailModal && selectedSale && (
+        <div className="modal show d-block" style={{ backgroundColor: 'rgba(0,0,0,0.5)' }}>
+          <div className="modal-dialog">
+            <div className="modal-content">
+              <div className="modal-header">
+                <h5 className="modal-title">Detalles de la Venta</h5>
+                <button 
+                  type="button" 
+                  className="btn-close" 
+                  onClick={() => {
+                    setShowDetailModal(false);
+                    setSelectedSale(null);
+                  }}
+                ></button>
+              </div>
+              <div className="modal-body">
+                <div className="mb-3">
+                  <strong>Fecha:</strong> {formatDate(selectedSale.createdAt)}
+                </div>
+                <div className="mb-3">
+                  <strong>Cliente:</strong> {selectedSale.customer?.name || 'Cliente General'}
+                </div>
+                <div className="mb-3">
+                  <strong>Tipo de Venta:</strong> {selectedSale.saleType}
+                </div>
+                <div className="mb-3">
+                  <strong>Método de Pago:</strong> {selectedSale.paymentMethod}
+                </div>
+                <div className="mb-3">
+                  <strong>Estado:</strong>
+                  <span className={`badge ms-2 ${selectedSale.status === 'Completada' ? 'bg-success' : 'bg-warning'}`}>
+                    {selectedSale.status}
+                  </span>
+                </div>
+                <div className="mb-3">
+                  <strong>Productos:</strong>
+                  <ul className="list-group mt-2">
+                    {selectedSale.items.map((item, index) => (
+                      <li key={index} className="list-group-item d-flex justify-content-between align-items-center">
+                        <div>
+                          {item.quantity}x {item.name}
+                          <small className="d-block text-muted">Precio unitario: ${item.price}</small>
+                        </div>
+                        <span className="badge bg-primary rounded-pill">
+                          ${item.subtotal}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                {selectedSale.notes && (
+                  <div className="mb-3">
+                    <strong>Observaciones:</strong>
+                    <p className="mt-1">{selectedSale.notes}</p>
+                  </div>
+                )}
+                <div className="text-end">
+                  <strong>Total:</strong> ${selectedSale.totalAmount}
+                </div>
+              </div>
+              <div className="modal-footer">
+                <button 
+                  type="button" 
+                  className="btn btn-secondary" 
+                  onClick={() => {
+                    setShowDetailModal(false);
+                    setSelectedSale(null);
+                  }}
+                >
+                  Cerrar
                 </button>
               </div>
             </div>
