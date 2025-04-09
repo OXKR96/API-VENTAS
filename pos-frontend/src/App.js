@@ -1,35 +1,109 @@
+// src/App.js
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
-import Login from './components/Login';
-import Dashboard from './components/Dashboard';
-import Products from './components/Products';
-import Sales from './components/Sales';
-import Purchases from './components/Purchases';
-import Suppliers from './components/Suppliers';
-import Customers from './components/Customers';
-import Layout from './components/Layout';
-import PrivateRoute from './components/PrivateRoute';
 
-function App() {
+import AuthProvider from './context/AuthContext';
+import OfflineProvider from './context/OfflineContext';
+import PrivateRoute from './components/PrivateRoute';
+import LoginPage from './pages/LoginPage';
+import NotFoundPage from './pages/NotFoundPage';
+import UnauthorizedPage from './pages/UnauthorizedPage';
+import DashboardPage from './pages/DashboardPage';
+import SimuladorPage from './pages/SimuladorPage';
+import OperacionesPage from './pages/OperacionesPage';
+import SucursalesPage from './pages/SucursalesPage';
+import LiquidacionPage from './pages/LiquidacionPage';
+import ClientesPage from './pages/ClientesPage';
+import UsuariosPage from './pages/UsuariosPage';
+import './styles/styles.css';
+
+const App = () => {
   return (
-    <Router>
-      <ToastContainer />
-      <Routes>
-        <Route path="/login" element={<Login />} />
-        <Route path="/" element={<PrivateRoute><Layout /></PrivateRoute>}>
-          <Route index element={<Navigate to="/dashboard" replace />} />
-          <Route path="dashboard" element={<Dashboard />} />
-          <Route path="products" element={<Products />} />
-          <Route path="sales" element={<Sales />} />
-          <Route path="purchases" element={<Purchases />} />
-          <Route path="suppliers" element={<Suppliers />} />
-          <Route path="customers" element={<Customers />} />
-        </Route>
-      </Routes>
-    </Router>
+    <AuthProvider>
+      <OfflineProvider>
+        <BrowserRouter>
+          <ToastContainer position="top-right" autoClose={3000} />
+          <Routes>
+            {/* Rutas públicas */}
+            <Route path="/login" element={<LoginPage />} />
+            <Route path="/unauthorized" element={<UnauthorizedPage />} />
+            
+            {/* Rutas para todos los usuarios (Comercial, Administrativo, Super Usuario) */}
+            <Route
+              path="/dashboard"
+              element={
+                <PrivateRoute>
+                  <DashboardPage />
+                </PrivateRoute>
+              }
+            />
+            
+            <Route
+              path="/simulador"
+              element={
+                <PrivateRoute>
+                  <SimuladorPage />
+                </PrivateRoute>
+              }
+            />
+            
+            {/* Rutas para Administrativo y Super Usuario */}
+            <Route
+              path="/operaciones"
+              element={
+                <PrivateRoute allowedRoles={['Administrativo', 'Super Usuario']}>
+                  <OperacionesPage />
+                </PrivateRoute>
+              }
+            />
+            
+            <Route
+              path="/sucursales"
+              element={
+                <PrivateRoute allowedRoles={['Administrativo', 'Super Usuario']}>
+                  <SucursalesPage />
+                </PrivateRoute>
+              }
+            />
+            
+            <Route
+              path="/liquidacion"
+              element={
+                <PrivateRoute allowedRoles={['Administrativo', 'Super Usuario']}>
+                  <LiquidacionPage />
+                </PrivateRoute>
+              }
+            />
+            
+            <Route
+              path="/clientes"
+              element={
+                <PrivateRoute allowedRoles={['Administrativo', 'Super Usuario']}>
+                  <ClientesPage />
+                </PrivateRoute>
+              }
+            />
+            
+            {/* Rutas solo para Super Usuario y Administrativo */}
+            <Route
+              path="/usuarios"
+              element={
+                <PrivateRoute allowedRoles={['Super Usuario', 'Administrativo']}>
+                  <UsuariosPage />
+                </PrivateRoute>
+              }
+            />
+            
+            {/* Redirecciones */}
+            <Route path="/" element={<Navigate to="/dashboard" replace />} />
+            <Route path="*" element={<NotFoundPage />} />
+          </Routes>
+        </BrowserRouter>
+      </OfflineProvider>
+    </AuthProvider>
   );
-}
+};
 
 export default App;
