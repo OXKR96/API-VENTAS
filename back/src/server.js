@@ -2,110 +2,78 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
+const cookieParser = require('cookie-parser');
+const colors = require('colors');
 const dotenv = require('dotenv');
+
+// Rutas
+const authRoutes = require('./routes/authRoutes');
+const usuarioRoutes = require('./routes/usuarioRoutes');
+const sucursalRoutes = require('./routes/sucursalRoutes');
+const creditoRoutes = require('./routes/creditoRoutes');
+const abonoRoutes = require('./routes/abonoRoutes');
+const liquidacionRoutes = require('./routes/liquidacionRoutes');
+const dashboardRoutes = require('./routes/dashboardRoutes');
+const clienteRoutes = require('./routes/clienteRoutes');
 
 // Cargar variables de entorno
 dotenv.config();
 
-// Importar rutas
-const userRoutes = require('./routes/userRoutes');
-const productRoutes = require('./routes/productRoutes');
-const saleRoutes = require('./routes/saleRoutes');
-const purchaseRoutes = require('./routes/purchaseRoutes');
-const supplierRoutes = require('./routes/supplierRoutes');
-const customerRoutes = require('./routes/customerRoutes');
-const statsRoutes = require('./routes/statsRoutes');
-
+// Inicializar express
 const app = express();
 
-// Middlewares
+// Middleware
 app.use(cors());
 app.use(express.json());
+app.use(express.urlencoded({ extended: false }));
+app.use(cookieParser());
 
-// Middleware de logging para desarrollo
-app.use((req, res, next) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
-  console.log('Headers:', req.headers);
-  console.log('Body:', req.body);
-  next();
-});
+// Rutas API
+app.use('/api/auth', authRoutes);
+app.use('/api/usuarios', usuarioRoutes);
+app.use('/api/sucursales', sucursalRoutes);
+app.use('/api/creditos', creditoRoutes);
+app.use('/api/abonos', abonoRoutes);
+app.use('/api/liquidaciones', liquidacionRoutes);
+app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/clientes', clienteRoutes);
 
-// Manejo de errores de MongoDB
-mongoose.connection.on('error', (err) => {
-  console.error('Error de MongoDB:', err);
-});
-
-mongoose.connection.on('disconnected', () => {
-  console.log('MongoDB desconectado');
-});
-
-// Conexión a MongoDB con reintentos
-const connectDB = async () => {
-  try {
-    await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/pos_system', {
-      useNewUrlParser: true,
-      useUnifiedTopology: true
-    });
-    console.log('Conectado a MongoDB exitosamente');
-  } catch (error) {
-    console.error('Error al conectar a MongoDB:', error);
-    // Reintentar conexión después de 5 segundos
-    setTimeout(connectDB, 5000);
-  }
-};
-
-connectDB();
-
-// Rutas
-app.use('/api/users', userRoutes);
-app.use('/api/products', productRoutes);
-app.use('/api/sales', saleRoutes);
-app.use('/api/purchases', purchaseRoutes);
-app.use('/api/suppliers', supplierRoutes);
-app.use('/api/customers', customerRoutes);
-app.use('/api/stats', statsRoutes);
-
-// Ruta principal
+// Ruta para verificar que el servidor está corriendo
 app.get('/', (req, res) => {
-  res.json({
-    message: 'API del Sistema POS',
-    version: '1.0.0',
-    status: 'active'
-  });
+  res.send('API está funcionando correctamente');
 });
 
-// Middleware para rutas no encontradas
-app.use((req, res, next) => {
-  res.status(404).json({
-    message: 'Ruta no encontrada',
-    path: req.path
-  });
+// Manejo de rutas no encontradas
+app.use((req, res) => {
+  res.status(404).json({ message: 'Endpoint no encontrado' });
 });
 
-// Middleware de manejo de errores
+// Manejo de errores
 app.use((err, req, res, next) => {
-  console.error('Error:', err);
-  res.status(err.status || 500).json({
-    message: err.message || 'Error interno del servidor',
-    error: process.env.NODE_ENV === 'development' ? err : {}
+  console.error(colors.red.bold(`Error: ${err.message}`));
+  res.status(500).json({
+    message: 'Error en el servidor',
+    stack: process.env.NODE_ENV === 'production' ? null : err.stack
   });
 });
 
-// Puerto del servidor
-const PORT = process.env.PORT || 3001;
+// Conectar a MongoDB
+mongoose.connect(process.env.MONGO_URI || 'mongodb://localhost:27017/creditosapp', {
+  useNewUrlParser: true,
+  useUnifiedTopology: true
+})
+.then(() => {
+  console.log(colors.cyan.bold('MongoDB Conectado'));
+})
+.catch(err => {
+  console.error(colors.red.bold(`Error al conectar a MongoDB: ${err.message}`));
+  process.exit(1);
+});
+
+// Puerto
+const PORT = process.env.PORT || 5000;
 
 // Iniciar servidor
-const server = app.listen(PORT, () => {
-  console.log(`Servidor corriendo en puerto ${PORT}`);
+app.listen(PORT, () => {
+  console.log(colors.yellow.bold(`Servidor corriendo en modo ${process.env.NODE_ENV || 'desarrollo'} en puerto ${PORT}`));
 });
-
-// Manejo de errores no capturados
-process.on('unhandledRejection', (err) => {
-  console.error('Error no manejado:', err);
-  // Cerrar servidor de forma segura
-  server.close(() => {
-    process.exit(1);
-  });
-});
-
-module.exports = app;

@@ -1,0 +1,14 @@
+{
+  "files": {
+    "main.css": "/static/css/main.bbcdac64.css",
+    "main.js": "/static/js/main.15d70047.js",
+    "static/media/LoginPage": "/static/media/LoginPage.70e99dcf710030dbd233",
+    "index.html": "/index.html",
+    "main.bbcdac64.css.map": "/static/css/main.bbcdac64.css.map",
+    "main.15d70047.js.map": "/static/js/main.15d70047.js.map"
+  },
+  "entrypoints": [
+    "static/css/main.bbcdac64.css",
+    "static/js/main.15d70047.js"
+  ]
+}
